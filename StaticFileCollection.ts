@@ -1,4 +1,4 @@
-import {IncomingMessage, OutgoingHttpHeaders, ServerResponse} from "http";
+import {IncomingMessage, ServerResponse} from "http";
 import * as fs from "fs";
 import * as path from "path";
 
