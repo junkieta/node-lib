@@ -1,5 +1,5 @@
 /*
- * "oimo" is frp library that inspired by "sodium".
+ * "doon" is frp library that inspired by "sodium".
  */
 type HTMLAttrName =
     "abbr" | "accept" | "accept-charset" | "accesskey" | "action" | "allow" | "allowfullscreen" | "allowpaymentrequest" | "alt" | "as" | "async" | "autocapitalize" | "autocomplete" | "autofocus" | "autoplay" | "charset" | "checked" | "cite" | "class" | "color" | "cols" | "colspan" | "content" | "contenteditable" | "controls" | "coords" | "crossorigin" | "data" | "datetime" | "decoding" | "default" | "defer" | "dir" | "dir" | "dirname" | "disabled" | "download" | "draggable" | "enctype" | "enterkeyhint" | "for" | "form" | "formaction" | "formenctype" | "formmethod" | "formnovalidate" | "formtarget" | "headers" | "height" | "hidden" | "high" | "href" | "hreflang" | "http-equiv" | "id" | "imagesizes" | "imagesrcset" | "inputmode" | "integrity" | "is" | "ismap" | "itemid" | "itemprop" | "itemref" | "itemscope" | "itemtype" | "kind" | "label" | "lang" | "list" | "loop" | "low" | "manifest" | "max" | "max" | "maxlength" | "media" | "method" | "min" | "minlength" | "multiple" | "muted" | "name" | "nomodule" | "nonce" | "novalidate" | "open" | "optimum" | "pattern" | "ping" | "placeholder" | "playsinline" | "poster" | "preload" | "readonly" | "referrerpolicy" | "rel" | "required" | "reversed" | "rows" | "rowspan" | "sandbox" | "scope" | "selected" | "shape" | "size" | "sizes" | "slot" | "span" | "spellcheck" | "src" | "srcdoc" | "srclang" | "srcset" | "start" | "step" | "style" | "tabindex" | "target" | "title" | "translate" | "type" | "usemap" | "value";
@@ -112,37 +112,37 @@ interface DOMEventHandlerMap {
     onpaste: DOMEventListenable<ClipboardEvent>;
 }
 
-type ElementSource = {
+export type ElementSource = {
     $?: AttributesSource | Cell<AttributesSource>;
 } & {
     [P in keyof HTMLElementTagNameMap]?: NodeSource;
 };
 
-type TextNodeSource =
+export type TextNodeSource =
     string | number | boolean | null | undefined;
 
-type DocumentFragmentSource = NodeSource[];
+export type DocumentFragmentSource = NodeSource[];
 
-type NodeSource =
+export type NodeSource =
     Node | TextNodeSource | DocumentFragmentSource | ElementSource | Cell<NodeSource>;
 
-type AttrValue =
+export type AttrValue =
     undefined | null | string | boolean | number | string[] | Cell<AttrValue> | StyleSource | DatasetSource | DOMEventListenable<any>;
 
-type StyleSource = {
+export type StyleSource = {
     [P in CSSPropertyName]: Cell<string | number | null> | string | number | null;
 };
 
-type DatasetSource = {
+export type DatasetSource = {
     [key: string]: Cell<string | number | null> | string | number | null;
 };
 
-type AttributesSource = { [P in HTMLAttrName]?: AttrValue; } & Partial<DOMEventHandlerMap> & { [key : string]: AttrValue; };
+export type AttributesSource = { [P in HTMLAttrName]?: AttrValue; } & Partial<DOMEventHandlerMap> & { [key : string]: AttrValue; };
 
-type AttrSource =
+export type AttrSource =
     AttributesSource | StyleSource | DatasetSource;
 
-type JSHTMLSource =
+export type JSHTMLSource =
     NodeSource | AttrSource | AttrValue;
 
 const _empty = () => { };
@@ -623,362 +623,6 @@ export class CellSink<A> extends Cell<A> {
 
 }
 
-const _keys = (o: Object): string[] => {
-    const a = [];
-    // Object.keysではなく、継承元のプロパティも列挙させるためにfor-inループを使う
-    for (let k in o) a[a.length] = k;
-    return a;
-};
-
-
-const JSHTMLADOPTER_SINGLETON = Symbol('JSHTMLADOPTER_SINGLETON');
-/**
- * JSHTML構造に組み込まれたCellの更新を管理する。
- * */
-class JSHTMLAdopter {
-
-    static [JSHTMLADOPTER_SINGLETON]: JSHTMLAdopter | null = null;
-
-    static singleton() : JSHTMLAdopter {
-        return JSHTMLAdopter[JSHTMLADOPTER_SINGLETON] || (JSHTMLAdopter[JSHTMLADOPTER_SINGLETON] = new JSHTMLAdopter());
-    }
-
-    private updated : [JSHTMLObject,JSHTMLSource,JSHTMLSource][] = [];
-    private contexts: Map<JSHTMLObject, Listener>;
-
-    constructor() {
-        if(JSHTMLAdopter[JSHTMLADOPTER_SINGLETON])
-            throw new Error('use static::singleton()');
-        this.contexts = new Map();
-    }
-
-    register(ctx: JSHTMLObject, cell: Cell<JSHTMLSource>) {
-        this.contexts.get(ctx)?.unlisten();
-        this.contexts.set(ctx, 
-            cell.listen((v) => this.reserveUpdate(ctx,v,cell.valueOf())));
-    }
-
-    unregister(ctx: JSHTMLObject) {
-        this.contexts.get(ctx)?.unlisten();
-        this.contexts.delete(ctx);
-    }
-
-    garbageCollect(root: JSHTMLObject): void {
-        Array.from(this.contexts.keys())
-            .filter((c) => root.contains(c))
-            .forEach((c) => this.unregister(c));
-    }
-
-    reserveUpdate(context: JSHTMLObject, new_value: JSHTMLSource, old_value: JSHTMLSource) {
-        if(this.updated.push([context,new_value,old_value]) !== 1)
-            return;
-        if(Transaction.currentTransaction.running)
-            Transaction.onTransactionEnd(() => {
-                while(this.updated.length)
-                    this.applyUpdate(this.updated.splice(0));
-            });
-        else 
-            while(this.updated.length)
-                this.applyUpdate(this.updated.splice(0));
-    }
-
-    applyUpdate(upd: [JSHTMLObject,JSHTMLSource,JSHTMLSource][]) {
-        upd.filter(([ctx1]) => upd
-            .every(([ctx2]) => ctx1 === ctx2 || !ctx2.contains(ctx1)))
-            .forEach(([ctx,v1,v2]) => {
-                this.garbageCollect(ctx);
-                ctx.update(v1,v2);
-            });
-    }
-
-}
-
-abstract class JSHTMLObject {
-    public parent?: JSHTMLObject;
-    abstract contains(context: JSHTMLObject) : boolean;
-    abstract update(v1: JSHTMLSource, v2?: JSHTMLSource) : void;
-}
-
-class JSHTMLNode extends JSHTMLObject {
-
-    public doc: Document;
-    public range: Range;
-    private placeholders: [Node, Cell<NodeSource>][];
-
-    constructor(point: Node | Range, parent?: JSHTMLNode) {
-        super();
-        this.placeholders = [];
-        this.parent = parent;
-        if (point instanceof Node) {
-            this.doc = <Document>point.ownerDocument;
-            this.range = new Range();
-            this.range.selectNode(point);
-        } else {
-            this.range = point;
-            this.doc = <Document>point.startContainer?.ownerDocument;
-        }
-    }
-    
-    contains(target: JSHTMLObject): boolean {
-        const contains = JSHTMLNode.a_contains_b;
-        if (this === target || !(target instanceof JSHTMLObject))
-            return false;
-        if (target instanceof JSHTMLAttrBase) {
-            const b = new Range();
-            b.selectNode(target.element);
-            return contains(this.range, b);
-        }
-        if(!(target instanceof JSHTMLNode) || !contains(this.range, target.range))
-            return false;
-        // rangeが重なっていても、targetが祖先である可能性を弾く
-        for(let c : JSHTMLObject | undefined = this.parent; c; c = c.parent)
-            if(c === target)
-                return false;
-        return true;
-    }
-
-    update(v: NodeSource): void {
-        const r1 = this.range;
-        const o = r1.endOffset;
-        const result = this.build(v);
-        r1.insertNode(result);
-
-        const r2 = r1.cloneRange();
-        r2.setStart(r2.startContainer, r2.startOffset + r2.endOffset - o);
-        r2.deleteContents();
-        r2.detach();
-
-        while (this.placeholders.length) {
-            this.placeholders
-                .splice(0)
-                .forEach(([n, source]) => JSHTMLAdopter.singleton().register(new JSHTMLNode(n, this), source));
-        }
-    }
-
-    build(source: NodeSource): Comment | DocumentFragment | HTMLElement | Text {
-        if (source instanceof Node) {
-            return <DocumentFragment>(source instanceof HTMLTemplateElement ? source.content : source).cloneNode(true);
-        }
-        // Cell to Comment
-        if (source instanceof Cell) {
-            const c = this.doc.createComment('[PLACEHOLDER]');
-            // placeholder は update メソッド内で読みだされる
-            this.placeholders.push([c, source]);
-            return c;
-        }
-        // Array to Document Fragment
-        if (Array.isArray(source)) {
-            if (!source.length) return this.doc.createComment('[PLACEHOLDER]');
-            const df = this.doc.createDocumentFragment();
-            source.map((v: any) => this.build(v))
-                .forEach((n: Node) => df.appendChild(n));
-            return df;
-        }
-        // primitive values to text
-        if (Object(source) !== source) {
-            return this.doc.createTextNode(<string>source);
-        }
-        // other object to element
-        return this.buildElement(<ElementSource> source);
-    }
-
-    protected buildElement<K extends keyof HTMLElementTagNameMap>(source: ElementSource): HTMLElementTagNameMap[K] {
-        const tag = <K>_keys(source).find((key: string) => key !== '$');
-        if (!tag) 
-            throw new Error('invalid argument : cannot parse source object');
-        const
-            elm = this.doc.createElement(tag),
-            children = <NodeSource> source[tag],
-            attributes = <AttributesSource> source.$;
-        if (children !== null)
-            elm.appendChild(this.build(children));
-        if (!attributes) return elm;
-        // set attributes
-        const context = new JSHTMLAttributes(elm);
-        if (attributes instanceof Cell)
-            JSHTMLAdopter.singleton().register(context, attributes);
-        else
-            context.update(attributes, {});
-        return elm;
-    }
-
-    static a_contains_b(a:Range, b: Range) {
-        return a === b ||
-            (a.compareBoundaryPoints(Range.START_TO_START, b) < 1 &&
-                a.compareBoundaryPoints(Range.END_TO_END, b) > -1);
-    }
-
-}
-
-abstract class JSHTMLAttrBase extends JSHTMLObject {
-
-    static merge_keys(...o: any[]) {
-        return o
-            .filter((o: any) => Object(o) === o)
-            .flatMap(_keys)
-            .filter((k,i,arr) => arr.indexOf(k,i+1) === -1);
-    }
-
-    protected static applyContext(
-        context: JSHTMLAttrBase,
-        values: { [key:string]: AttrValue } = {},
-        old_values: { [key: string]: AttrValue } = {}
-    ) {
-        const v1 = values[context.name], v2 = old_values[context.name];
-        if (v1 instanceof Cell)
-            JSHTMLAdopter.singleton().register(context, v1);
-        else
-            context.update(v1, v2);
-    }
-
-    public element: Element;
-    public name: string;
-
-    constructor(element: Element, name: string) {
-        super();
-        this.element = element;
-        this.name = name;
-    }
-
-    contains(context: JSHTMLObject) {
-        return context !== this && context instanceof JSHTMLAttrBase && this.element === context.element;
-    }
-
-}
-
-class JSHTMLAttributes extends JSHTMLAttrBase {
-
-    constructor(element: Element) {
-        super(element, "attributes");
-    }
-
-    update(value: AttributesSource, old: AttributesSource): void {
-        JSHTMLAttrBase
-            .merge_keys(value, old)
-            .forEach((k: string) =>
-                JSHTMLAttrBase.applyContext(new JSHTMLAttr(this.element, k), value, old));
-    }
-
-}
-
-class JSHTMLAttr extends JSHTMLAttrBase {
-
-    static INPUT_PROPERTIES = {
-        // boolean attributes
-        disabled: true,
-		autofocus: true,
-		required: true,
-		checked: true,
-		defaultChecked: true,
-		indeterminate: true,
-		readOnly: true,
-		multiple: true,
-        // other
-        name: false,
-	    value: false,
-        defaultValue: false,
-	    placeholder: false,
-	    pattern: false,
-	    min: false,
-	    max: false,
-    }
-
-    static is_listener(value: any): boolean {
-        return value != null &&
-            (typeof value === 'function' || typeof (<EventListenerObject>value).handleEvent === 'function');
-    }
-
-    update(value: AttrValue, old_value: AttrValue) : void {
-        const elm = this.element, name = <HTMLAttrName | "dataset">this.name;
-        if(name === 'class' && Array.isArray(value))
-            return this.update(value.filter(Boolean).join(' '), old_value);
-        if (/^on./.test(name)) {
-            if (JSHTMLAttr.is_listener(old_value))
-                elm.removeEventListener(name.slice(2), <EventListenerOrEventListenerObject>old_value, false);
-            if (JSHTMLAttr.is_listener(value))
-                elm.addEventListener(name.slice(2), <EventListenerOrEventListenerObject>value, false);
-        }
-        else if (name === 'style' || name === 'dataset')
-            JSHTMLAttrBase
-                .merge_keys(value, old_value)
-                .map(name === 'style'
-                    ? (key) => new JSHTMLStyleAttr(elm, key)
-                    : (key) => new JSHTMLDataset(elm, key))
-                .forEach((context) =>
-                    JSHTMLAttrBase
-                        .applyContext(context, <StyleSource | DatasetSource>value, <StyleSource | DatasetSource>old_value));
-        // setAttributeを使った場合、input要素の属性変更はビューに反映されないバグがある(only firefox ?)
-        else if (/^(?:INPUT|BUTTON)$/i.test(elm.tagName))
-            this.updateInputElement(value);
-        else if (value == null || value == '')
-            elm.removeAttribute(name);
-        else if (Object(value) !== value)
-            elm.setAttribute(name, <string>value);
-    }
-
-    updateInputElement(value: AttrValue) : void {
-        const elm = <HTMLInputElement> this.element, name = <HTMLInputElementAttr>this.name;
-        if(JSHTMLAttr.INPUT_PROPERTIES.hasOwnProperty(name))
-            elm[<HTMLInputBooleanAttr>name] = <boolean> value;
-        else if(value == null || value === false)
-            elm.removeAttribute(name.toLowerCase());
-        else
-            elm.setAttribute(name.toLowerCase(), value === true ? name.toLowerCase() : <string>value);
-    }
-
-    contains(context: JSHTMLObject): boolean {
-        if (!super.contains(context))
-            return false;
-        if (context instanceof JSHTMLAttr)
-            return this.name === context.name;
-        if (context instanceof JSHTMLStyleAttr)
-            return this.name === 'style';
-        if (context instanceof JSHTMLDataset)
-            return this.name === 'dataset';
-        return false;
-    }
-
-}
-
-class JSHTMLStyleAttr extends JSHTMLAttrBase {
-
-    /**
-     * キャメルからハイフン区切りに変換する(ex: zIndex -> z-index)
-     */
-    static camelToHyphenSeparated(str: string) {
-        return str.replace(/[A-Z]/g, (s: string) => '-' + s.toLowerCase());
-    }
-
-    contains(context: JSHTMLObject): boolean {
-        return super.contains(context) && context instanceof JSHTMLStyleAttr && this.name === context.name;
-    }
-
-    update(value: AttrValue): void {
-        const name = JSHTMLStyleAttr.camelToHyphenSeparated(this.name);
-        const css = (<HTMLElement>this.element).style;
-        if (value == null)
-            css.removeProperty(name);
-        else
-            css.setProperty(name, <string>value);
-    }
-
-}
-
-class JSHTMLDataset extends JSHTMLAttrBase {
-
-    static camelize = (str: string) =>
-       str.replace(/-[a-z]/g, (s:string) => s.charAt(1).toUpperCase());
-
-    contains(context: JSHTMLObject): boolean {
-        return super.contains(context) && context instanceof JSHTMLDataset && this.name === context.name;
-    }
-
-    update(value: AttrValue): void {
-        (<HTMLElement>this.element).dataset[JSHTMLDataset.camelize(this.name)] = value == null ? '' : <string>value;
-    }
-
-}
-
 /**
  * DOM EventをStreamに変換するクラス。
  * JSHTML内でイベントハンドラ(onclick, onkeydown等)の属性値として設置することで稼働する。
@@ -1007,12 +651,326 @@ export class EventStream<E extends Event> extends StreamSink<E> implements Event
 
 }
 
+abstract class DoonObject {
+    public ownerDocument?: DoonDocument;
+    abstract contains(o: DoonObject) : boolean;
+    abstract update(value: JSHTMLSource, old_value: JSHTMLSource) : void;
+};
+
+class DoonDocument {
+
+    public originalDoc: Document;
+    public rootNode: DoonNode;
+    public placeholder: [Comment,Cell<JSHTMLSource>][];
+    protected connection: Map<DoonObject, Listener>;
+    protected updated: [DoonObject,JSHTMLSource,JSHTMLSource][];
+
+    constructor(root: ShadowRoot) {
+        this.originalDoc = root.ownerDocument;
+        this.placeholder = [];
+        this.connection = new Map();
+        this.updated = [];
+
+        const range = new Range();
+        range.selectNodeContents(root);
+
+        this.rootNode = new DoonNode(this, range);
+    }
+
+    createNode(source: NodeSource) {
+        // Cell to Comment
+        if (source instanceof Cell) {
+            const comment = this.originalDoc.createComment('[PLACEHOLDER]');
+            this.placeholder.push([comment, source]);
+            return comment;
+        }
+        if (source instanceof Node) {
+            return <DocumentFragment>(source instanceof HTMLTemplateElement ? source.content : source).cloneNode(true);
+        }
+        // Array to Document Fragment
+        if (Array.isArray(source)) {
+            if (!source.length)
+                return this.originalDoc.createComment('[PLACEHOLDER]');
+            const df = this.originalDoc.createDocumentFragment();
+            source.map((v: any) => this.createNode(v))
+                .forEach((n: Node) => df.appendChild(n));
+            return df;
+        }
+        // primitive values to text
+        if (Object(source) !== source) {
+            return this.originalDoc.createTextNode(<string>source);
+        }
+        // other object to element
+        for (let tag in <ElementSource> source) {
+            if(tag === '$') continue;
+            const
+                elm = this.originalDoc.createElement(tag),
+                children = (<{[tag:string]:NodeSource}>source)[tag],
+                attributes = (<{$:AttributesSource}>source).$;
+            // add children
+            if (children !== null)
+                elm.appendChild(this.createNode(children));
+            // apply attributes
+            if (Object(attributes) !== attributes) 
+                return elm;
+            if (attributes instanceof Cell)
+                this.registerCell(new DoonAttributes(this, elm), attributes);
+            else
+                DoonDocument.mergePropertyNames(attributes)
+                    .forEach((k) => this.applyAttr(elm, k, attributes[k]));
+            return elm;
+        }
+        throw new Error('invalid argument : cannot parse source object');
+    }
+
+    applyAttr(elm: HTMLElement, name: string, value: AttrValue, old_value?: AttrValue) {
+        if (value instanceof Cell)
+            this.registerCell(new DoonAttr(this, elm, name), value);
+        else if (/^on./.test(name)) {
+            if (this.validateEventListenable(old_value))
+                elm.removeEventListener(name.slice(2), <EventListenerOrEventListenerObject>old_value, false);
+            if (this.validateEventListenable(value))
+                elm.addEventListener(name.slice(2), <EventListenerOrEventListenerObject>value, false);
+        }
+        else if (Object(value) === value) {
+            if (name === 'class') {
+                elm.className = Array.isArray(value)
+                    ? value.join(" ")
+                    : '' + value;
+            } else if (/^style|dataset$/.test(name)) {
+                DoonDocument
+                    .mergePropertyNames(value, old_value)
+                    .map(name === 'style'
+                        ? (k) : [DoonStyleValue, AttrValue] =>
+                                    [new DoonStyleValue(this, elm, DoonStyleValue.camelToHyphenSeparated(k)), (<{[key:string]:AttrValue}>value)[k]]
+                        : (k) : [DoonDatasetValue, AttrValue] =>
+                                    [new DoonDatasetValue(this, elm, DoonDatasetValue.hyphenSeparatedToCamelize(k)), (<{[key:string]:AttrValue}>value)[k]])
+                    .forEach(([a,v]) => {
+                        if(v instanceof Cell)
+                            this.registerCell(a, v);
+                        else
+                            a.update(v);
+                    });
+            }
+        }
+        else if (name in Object.getPrototypeOf(elm))
+            elm[<"id">name] = <string>value;
+        else if (value == null || value == '')
+            elm.removeAttribute(name);
+        else
+            elm.setAttribute(name, value + '');
+    }
+
+    registerCell(ctx: DoonObject, cell: Cell<JSHTMLSource>) {
+        this.connection.get(ctx)?.unlisten();
+        this.connection.set(ctx, cell.listen((v) => this.reserveCellUpdate(ctx,v,cell.valueOf())));
+    }
+
+    unregisterCell(ctx: DoonObject) {
+        this.connection.get(ctx)?.unlisten();
+        this.connection.delete(ctx);
+    }
+
+    garbageCollect(root: DoonObject): void {
+        Array.from(this.connection.keys())
+            .filter((c) => root.contains(c))
+            .forEach((c) => this.unregisterCell(c));
+    }
+
+    reserveCellUpdate(context: DoonObject, new_value: JSHTMLSource, old_value: JSHTMLSource) {
+        if(this.updated.push([context,new_value,old_value]) !== 1) return;
+        const exec_update = () => {
+            while(this.updated.length) this.applyCellUpdate(this.updated.splice(0));
+        };
+        if(Transaction.currentTransaction.running)
+            Transaction.onTransactionEnd(exec_update);
+        else 
+            exec_update();
+    }
+
+    applyCellUpdate(upd: [DoonObject, JSHTMLSource, JSHTMLSource][]) {
+        upd.filter(([ctx1]) => upd.every(([ctx2]) => ctx1 === ctx2 || !ctx2.contains(ctx1)))
+            .forEach(([ctx,v1,v2]) => {
+                this.garbageCollect(ctx);
+                ctx.update(v1,v2);
+            });
+    }
+
+    /**
+     * 引数がイベントリスナか判定する
+     * @param value
+     */
+    protected validateEventListenable(value: any) : boolean {
+       return value && (typeof value === "function" || typeof (<EventListenerObject>value).handleEvent === 'function');
+    }
+
+    /**
+     * 引数に渡された全てのオブジェクトのキーをマージ
+     * @param o
+     */
+    static mergePropertyNames(...o : any[]) : string[] {
+        return o
+            .flatMap((o) => { const result : string[] = []; if(o) for(let k in o) result.push(k); return result; })
+            .filter((k,i,a) => a.indexOf(k,i+1) === -1);
+    }
+
+}
+
+class DoonNode extends DoonObject {
+
+    public parent?: DoonNode;
+    public range: Range;
+
+    constructor(doc : DoonDocument, point: Node | Range, parent?: DoonNode) {
+        super();
+        this.ownerDocument = doc;
+        this.parent = parent;
+        if (point instanceof Node) {
+            this.range = new Range();
+            this.range.selectNode(point);
+        } else {
+            this.range = point;
+        }
+    }
+    
+    contains(target: DoonObject): boolean {
+        const contains = DoonNode.a_contains_b;
+        if (this === target || !(target instanceof DoonObject))
+            return false;
+        if (target instanceof DoonAttr) {
+            const b = new Range();
+            b.selectNode(target.element);
+            return contains(this.range, b);
+        }
+        if(!(target instanceof DoonNode) || !contains(this.range, target.range))
+            return false;
+        // rangeが重なっていても、targetが祖先である可能性を弾く
+        for(let c = this.parent; c; c = c.parent) if(c === target) return false;
+        return true;
+    }
+
+    update(v: NodeSource): void {
+        const doc = <DoonDocument>this.ownerDocument;
+        const r1 = this.range;
+        const o = r1.endOffset;
+        r1.insertNode(doc.createNode(v));
+
+        const r2 = r1.cloneRange();
+        r2.setStart(r2.startContainer, r2.startOffset + r2.endOffset - o);
+        r2.deleteContents();
+        r2.detach();
+
+        while (doc.placeholder.length) {
+            doc.placeholder
+                .splice(0)
+                .forEach(([n, source]) => doc.registerCell(new DoonNode(doc, n, this), source));
+        }
+
+    }
+
+    static a_contains_b(a:Range, b: Range) {
+        return a === b ||
+            (a.compareBoundaryPoints(Range.START_TO_START, b) < 1 &&
+                a.compareBoundaryPoints(Range.END_TO_END, b) > -1);
+    }
+
+}
+
+class DoonAttributes extends DoonObject {
+
+    public element: HTMLElement;
+
+    constructor(doc: DoonDocument, elm: HTMLElement) {
+        super();
+        this.ownerDocument = doc;
+        this.element = elm;
+    }
+
+    contains(o: DoonObject): boolean {
+        return this.ownerDocument === o.ownerDocument
+            && this.element === (<{element?:HTMLElement}>o).element
+            && (o instanceof DoonAttributes || o instanceof DoonAttr);
+    }
+
+    update(v1: AttributesSource, v2: AttributesSource = {}): void {
+        DoonDocument.mergePropertyNames(v1,v2)
+            .forEach((k) => (<DoonDocument>this.ownerDocument).applyAttr(this.element, k, v1[k], v2[k]));
+    }
+
+}
+
+class DoonAttr extends DoonObject {
+
+    public element: HTMLElement;
+    public name: string;
+
+    constructor(doc: DoonDocument, element: HTMLElement, name: string) {
+        super();
+        this.ownerDocument = doc;
+        this.element = element;
+        this.name = name;
+    }
+
+    update(value: AttrValue, old_value: AttrValue) : void {
+        (<DoonDocument>this.ownerDocument).applyAttr(this.element, this.name, value, old_value);
+    }
+
+    contains(o: DoonObject): boolean {
+        if (o === this)
+            return false;
+        if (o instanceof DoonStyleValue)
+            return this.name === 'style';
+        if (o instanceof DoonDatasetValue)
+            return this.name === 'dataset';
+        if (o instanceof DoonAttr)
+            return this.name === o.name;
+        return false;
+    }
+}
+
+class DoonStyleValue extends DoonAttr {
+
+    contains(o: DoonObject): boolean {
+        return this !== o && o instanceof DoonStyleValue && this.element === o.element && this.name === o.name;
+    }
+
+    update(value: JSHTMLSource): void {
+        if(value === null || value === undefined)
+            this.element.style.removeProperty(this.name);
+        else
+            this.element.style.setProperty(this.name, value + '');
+    }
+
+    /**
+     * キャメルからハイフン区切りに変換する(ex: zIndex -> z-index)
+     */
+    static camelToHyphenSeparated(str: string) {
+        return str.replace(/[A-Z]/g, (s: string) => '-' + s.toLowerCase());
+    }
+
+}
+
+class DoonDatasetValue extends DoonAttr {
+
+    static hyphenSeparatedToCamelize = (str: string) =>
+       str.replace(/-[a-z]/g, (s:string) => s.charAt(1).toUpperCase());
+
+    contains(o: DoonObject): boolean {
+        return this !== o && o instanceof DoonDatasetValue && this.name === o.name;
+    }
+
+    update(value: AttrValue): void {
+        (<HTMLElement>this.element).dataset[this.name] = value == null ? '' : <string>value;
+    }
+
+}
+
 export abstract class Component extends HTMLElement {
 
-    abstract render() : NodeSource;
+    abstract render() : NodeSource | Cell<NodeSource>;
 
     public events: EventStream<Event>;
-    private context? : JSHTMLNode;
+    public shadowDocument? : DoonDocument;
 
     constructor() {
         super();
@@ -1035,23 +993,14 @@ export abstract class Component extends HTMLElement {
     }
 
     connectedCallback() {
-        if(this.context) return;
-        const shadow = this.attachShadow({ mode : "open" });
+        if(this.shadowDocument) return;
+        const shadow = this.attachShadow({ mode : "closed" });
         this.observedEvents.forEach((e) => shadow.addEventListener(e, this.events));
-        const range = new Range();
-        range.selectNodeContents(shadow);
-        this.context = new JSHTMLNode(range);
-        this.context.update(this.render());
-    }
-
-    disconnectedCallback() {
-        const shadow = this.shadowRoot;
-        if(shadow)
-            this.observedEvents.forEach((e) => shadow.removeEventListener(e, this.events));
+        this.shadowDocument = new DoonDocument(shadow);
+        this.shadowDocument.rootNode.update(this.render());
     }
 
 }
-
 
 export default {
     Component,
