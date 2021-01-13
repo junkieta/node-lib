@@ -1,116 +1,15 @@
 /*
- * "doon" is frp library that inspired by "sodium".
+ * "oimo" is frp library that inspired by "sodium".
  */
 type HTMLAttrName =
     "abbr" | "accept" | "accept-charset" | "accesskey" | "action" | "allow" | "allowfullscreen" | "allowpaymentrequest" | "alt" | "as" | "async" | "autocapitalize" | "autocomplete" | "autofocus" | "autoplay" | "charset" | "checked" | "cite" | "class" | "color" | "cols" | "colspan" | "content" | "contenteditable" | "controls" | "coords" | "crossorigin" | "data" | "datetime" | "decoding" | "default" | "defer" | "dir" | "dir" | "dirname" | "disabled" | "download" | "draggable" | "enctype" | "enterkeyhint" | "for" | "form" | "formaction" | "formenctype" | "formmethod" | "formnovalidate" | "formtarget" | "headers" | "height" | "hidden" | "high" | "href" | "hreflang" | "http-equiv" | "id" | "imagesizes" | "imagesrcset" | "inputmode" | "integrity" | "is" | "ismap" | "itemid" | "itemprop" | "itemref" | "itemscope" | "itemtype" | "kind" | "label" | "lang" | "list" | "loop" | "low" | "manifest" | "max" | "max" | "maxlength" | "media" | "method" | "min" | "minlength" | "multiple" | "muted" | "name" | "nomodule" | "nonce" | "novalidate" | "open" | "optimum" | "pattern" | "ping" | "placeholder" | "playsinline" | "poster" | "preload" | "readonly" | "referrerpolicy" | "rel" | "required" | "reversed" | "rows" | "rowspan" | "sandbox" | "scope" | "selected" | "shape" | "size" | "sizes" | "slot" | "span" | "spellcheck" | "src" | "srcdoc" | "srclang" | "srcset" | "start" | "step" | "style" | "tabindex" | "target" | "title" | "translate" | "type" | "usemap" | "value";
 
-type HTMLInputElementAttr =
-    "accept"|"alt"|"autocomplete"|"autofocus"|"checked"|"dirname"|"disabled"|"formaction"|"formenctype"|"formmethod"|"formnovalidate"|"formtarget"|"height"|"max"|"maxlength"|"min"|"minlength"|"multiple"|"name"|"pattern"|"placeholder"|"readonly"|"required"|"size"|"src"|"step"|"type"|"value"|"width";
-
-type HTMLInputBooleanAttr =
-    "disabled"|"autofocus"|"required"|"checked"|"defaultChecked"|"indeterminate"|"readOnly"|"multiple";
-
 type CSSPropertyName =
-    { [P in keyof CSSStyleDeclaration]: CSSStyleDeclaration[P] extends CSSRule | Function ? never : P }[keyof CSSStyleDeclaration];
+    { [P in keyof CSSStyleDeclaration]: CSSStyleDeclaration[P] extends string ? P : never }[keyof CSSStyleDeclaration];
 
-interface DOMEventListener<E extends Event> { (evt: E): void; }
-interface DOMEventListenerObject<E extends Event> { handleEvent(evt: E) : void; }
-type DOMEventListenable<E extends Event> = DOMEventListener<E> | DOMEventListenerObject<E> | string;
-
-interface DOMEventHandlerMap {
-    onfullscreenchange: DOMEventListenable<Event>;
-    onfullscreenerror: DOMEventListenable<Event>;
-    onabort: DOMEventListenable<UIEvent>;
-    onanimationcancel: DOMEventListenable<AnimationEvent>;
-    onanimationend: DOMEventListenable<AnimationEvent>;
-    onanimationiteration: DOMEventListenable<AnimationEvent>;
-    onanimationstart: DOMEventListenable<AnimationEvent>;
-    onauxclick: DOMEventListenable<MouseEvent>;
-    onblur: DOMEventListenable<FocusEvent>;
-    oncancel: DOMEventListenable<Event>;
-    oncanplay: DOMEventListenable<Event>;
-    oncanplaythrough: DOMEventListenable<Event>;
-    onchange: DOMEventListenable<Event>;
-    onclick: DOMEventListenable<MouseEvent>;
-    onclose: DOMEventListenable<Event>;
-    oncontextmenu: DOMEventListenable<MouseEvent>;
-    oncuechange: DOMEventListenable<Event>;
-    ondblclick: DOMEventListenable<MouseEvent>;
-    ondrag: DOMEventListenable<DragEvent>;
-    ondragend: DOMEventListenable<DragEvent>;
-    ondragenter: DOMEventListenable<DragEvent>;
-    ondragexit: DOMEventListenable<Event>;
-    ondragleave: DOMEventListenable<DragEvent>;
-    ondragover: DOMEventListenable<DragEvent>;
-    ondragstart: DOMEventListenable<DragEvent>;
-    ondrop: DOMEventListenable<DragEvent>;
-    ondurationchange: DOMEventListenable<Event>;
-    onemptied: DOMEventListenable<Event>;
-    onended: DOMEventListenable<Event>;
-    onerror: DOMEventListenable<ErrorEvent>;
-    onfocus: DOMEventListenable<FocusEvent>;
-    onfocusin: DOMEventListenable<FocusEvent>;
-    onfocusout: DOMEventListenable<FocusEvent>;
-    ongotpointercapture: DOMEventListenable<PointerEvent>;
-    oninput: DOMEventListenable<Event>;
-    oninvalid: DOMEventListenable<Event>;
-    onkeydown: DOMEventListenable<KeyboardEvent>;
-    onkeypress: DOMEventListenable<KeyboardEvent>;
-    onkeyup: DOMEventListenable<KeyboardEvent>;
-    onload: DOMEventListenable<Event>;
-    onloadeddata: DOMEventListenable<Event>;
-    onloadedmetadata: DOMEventListenable<Event>;
-    onloadstart: DOMEventListenable<Event>;
-    onlostpointercapture: DOMEventListenable<PointerEvent>;
-    onmousedown: DOMEventListenable<MouseEvent>;
-    onmouseenter: DOMEventListenable<MouseEvent>;
-    onmouseleave: DOMEventListenable<MouseEvent>;
-    onmousemove: DOMEventListenable<MouseEvent>;
-    onmouseout: DOMEventListenable<MouseEvent>;
-    onmouseover: DOMEventListenable<MouseEvent>;
-    onmouseup: DOMEventListenable<MouseEvent>;
-    onpause: DOMEventListenable<Event>;
-    onplay: DOMEventListenable<Event>;
-    onplaying: DOMEventListenable<Event>;
-    onpointercancel: DOMEventListenable<PointerEvent>;
-    onpointerdown: DOMEventListenable<PointerEvent>;
-    onpointerenter: DOMEventListenable<PointerEvent>;
-    onpointerleave: DOMEventListenable<PointerEvent>;
-    onpointermove: DOMEventListenable<PointerEvent>;
-    onpointerout: DOMEventListenable<PointerEvent>;
-    onpointerover: DOMEventListenable<PointerEvent>;
-    onpointerup: DOMEventListenable<PointerEvent>;
-    onprogress: DOMEventListenable<ProgressEvent>;
-    onratechange: DOMEventListenable<Event>;
-    onreset: DOMEventListenable<Event>;
-    onresize: DOMEventListenable<UIEvent>;
-    onscroll: DOMEventListenable<Event>;
-    onsecuritypolicyviolation: DOMEventListenable<SecurityPolicyViolationEvent>;
-    onseeked: DOMEventListenable<Event>;
-    onseeking: DOMEventListenable<Event>;
-    onselect: DOMEventListenable<Event>;
-    onselectionchange: DOMEventListenable<Event>;
-    onselectstart: DOMEventListenable<Event>;
-    onstalled: DOMEventListenable<Event>;
-    onsubmit: DOMEventListenable<Event>;
-    onsuspend: DOMEventListenable<Event>;
-    ontimeupdate: DOMEventListenable<Event>;
-    ontoggle: DOMEventListenable<Event>;
-    ontouchcancel: DOMEventListenable<TouchEvent>;
-    ontouchend: DOMEventListenable<TouchEvent>;
-    ontouchmove: DOMEventListenable<TouchEvent>;
-    ontouchstart: DOMEventListenable<TouchEvent>;
-    ontransitioncancel: DOMEventListenable<TransitionEvent>;
-    ontransitionend: DOMEventListenable<TransitionEvent>;
-    ontransitionrun: DOMEventListenable<TransitionEvent>;
-    ontransitionstart: DOMEventListenable<TransitionEvent>;
-    onvolumechange: DOMEventListenable<Event>;
-    onwaiting: DOMEventListenable<Event>;
-    onwheel: DOMEventListenable<WheelEvent>;
-    oncopy: DOMEventListenable<ClipboardEvent>;
-    oncut: DOMEventListenable<ClipboardEvent>;
-    onpaste: DOMEventListenable<ClipboardEvent>;
-}
+type DOMEventHandler =
+    Omit<GlobalEventHandlers, "addEventListener" | "removeEventListener"> &
+    Omit<DocumentAndElementEventHandlers, "addEventListener" | "removeEventListener">;
 
 export type ElementSource = {
     $?: AttributesSource | Cell<AttributesSource>;
@@ -127,7 +26,7 @@ export type NodeSource =
     Node | TextNodeSource | DocumentFragmentSource | ElementSource | Cell<NodeSource>;
 
 export type AttrValue =
-    undefined | null | string | boolean | number | string[] | Cell<AttrValue> | StyleSource | DatasetSource | DOMEventListenable<any>;
+    undefined | null | string | boolean | number | string[] | Cell<AttrValue> | StyleSource | DatasetSource | EventListener | EventListenerObject;
 
 export type StyleSource = {
     [P in CSSPropertyName]: Cell<string | number | null> | string | number | null;
@@ -137,7 +36,8 @@ export type DatasetSource = {
     [key: string]: Cell<string | number | null> | string | number | null;
 };
 
-export type AttributesSource = { [P in HTMLAttrName]?: AttrValue; } & Partial<DOMEventHandlerMap> & { [key : string]: AttrValue; };
+export type AttributesSource =
+    { [P in HTMLAttrName]?: AttrValue; } & Partial<DOMEventHandler> & { [key : string]: AttrValue; };
 
 export type AttrSource =
     AttributesSource | StyleSource | DatasetSource;
@@ -199,6 +99,7 @@ export class Transaction extends Array<Function> {
     }
 
 }
+
 
 /**
  * Stream,Cellの接続を処理する。
@@ -720,6 +621,7 @@ class DoonDocument {
                     .forEach((k) => this.applyAttr(elm, k, attributes[k]));
             return elm;
         }
+
         throw new Error('invalid argument : cannot parse source object');
     }
 
@@ -735,7 +637,7 @@ class DoonDocument {
         else if (Object(value) === value) {
             if (name === 'class') {
                 elm.className = Array.isArray(value)
-                    ? value.join(" ")
+                    ? value.filter(Boolean).join(" ")
                     : '' + value;
             } else if (/^style|dataset$/.test(name)) {
                 DoonDocument
@@ -916,22 +818,19 @@ class DoonAttr extends DoonObject {
     }
 
     contains(o: DoonObject): boolean {
-        if (o === this)
-            return false;
         if (o instanceof DoonStyleValue)
             return this.name === 'style';
         if (o instanceof DoonDatasetValue)
             return this.name === 'dataset';
-        if (o instanceof DoonAttr)
-            return this.name === o.name;
-        return false;
+        return o instanceof DoonAttr && this.name === o.name && o !== this;
     }
+
 }
 
 class DoonStyleValue extends DoonAttr {
 
     contains(o: DoonObject): boolean {
-        return this !== o && o instanceof DoonStyleValue && this.element === o.element && this.name === o.name;
+        return o instanceof DoonStyleValue && this.element === o.element && this.name === o.name && this !== o;
     }
 
     update(value: JSHTMLSource): void {
@@ -956,7 +855,7 @@ class DoonDatasetValue extends DoonAttr {
        str.replace(/-[a-z]/g, (s:string) => s.charAt(1).toUpperCase());
 
     contains(o: DoonObject): boolean {
-        return this !== o && o instanceof DoonDatasetValue && this.name === o.name;
+        return o instanceof DoonDatasetValue && this.name === o.name && this !== o;
     }
 
     update(value: AttrValue): void {
@@ -967,37 +866,38 @@ class DoonDatasetValue extends DoonAttr {
 
 export abstract class Component extends HTMLElement {
 
-    abstract render() : NodeSource | Cell<NodeSource>;
+    abstract render() : NodeSource;
 
     public events: EventStream<Event>;
-    public shadowDocument? : DoonDocument;
+    public shadowDocument : DoonDocument;
 
     constructor() {
         super();
         this.events = new EventStream;
-    }
-
-    parentComponent() : Component | null {
-        const n = this.parentNode;
-        if(!n)
-            return null;
-        if(!(n instanceof ShadowRoot)) 
-            return this.parentComponent.call(n);
-        if(n.host instanceof Component)
-            return n.host;
-        return this.parentComponent.call(n.host);
-    }
-
-    get observedEvents() : string[] {
-        return [];
+        const shadow = this.attachShadow({ mode : "closed" });
+        const events = (<{observedEvents:string[]}><unknown>this.constructor).observedEvents;
+        if(Array.isArray(events))
+            events.forEach((e) => shadow.addEventListener(e, this.events));
+        this.shadowDocument = new DoonDocument(shadow);
+		if(Array.isArray((<{observedAttributes:string[]}><unknown>this.constructor).observedAttributes))
+			this.addEventListener('hostattrchanged', this.events, true);
     }
 
     connectedCallback() {
-        if(this.shadowDocument) return;
-        const shadow = this.attachShadow({ mode : "closed" });
-        this.observedEvents.forEach((e) => shadow.addEventListener(e, this.events));
-        this.shadowDocument = new DoonDocument(shadow);
-        this.shadowDocument.rootNode.update(this.render());
+        this.updateShadow(this.render());
+    }
+
+    disconnectedCallback() {
+        this.updateShadow(null);
+    }
+
+    attributeChangedCallback(name: string, oldValue: string, newValue: string) {
+		this.dispatchEvent(new CustomEvent('hostattrchanged', { detail: { name:name,oldValue:oldValue,newValue:newValue } }));
+    }
+
+    updateShadow(source: NodeSource) {
+        this.shadowDocument.rootNode.update(source);
+		this.dispatchEvent(new CustomEvent('shadowupdated', { bubbles: true }));
     }
 
 }
