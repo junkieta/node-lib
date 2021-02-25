@@ -1,49 +1,7 @@
+///<reference path="./doon.d.ts" />
 /*
- * "oimo" is frp library that inspired by "sodium".
+ * "doon" is frp library that inspired by "sodium".
  */
-type HTMLAttrName =
-    "abbr" | "accept" | "accept-charset" | "accesskey" | "action" | "allow" | "allowfullscreen" | "allowpaymentrequest" | "alt" | "as" | "async" | "autocapitalize" | "autocomplete" | "autofocus" | "autoplay" | "charset" | "checked" | "cite" | "class" | "color" | "cols" | "colspan" | "content" | "contenteditable" | "controls" | "coords" | "crossorigin" | "data" | "datetime" | "decoding" | "default" | "defer" | "dir" | "dir" | "dirname" | "disabled" | "download" | "draggable" | "enctype" | "enterkeyhint" | "for" | "form" | "formaction" | "formenctype" | "formmethod" | "formnovalidate" | "formtarget" | "headers" | "height" | "hidden" | "high" | "href" | "hreflang" | "http-equiv" | "id" | "imagesizes" | "imagesrcset" | "inputmode" | "integrity" | "is" | "ismap" | "itemid" | "itemprop" | "itemref" | "itemscope" | "itemtype" | "kind" | "label" | "lang" | "list" | "loop" | "low" | "manifest" | "max" | "max" | "maxlength" | "media" | "method" | "min" | "minlength" | "multiple" | "muted" | "name" | "nomodule" | "nonce" | "novalidate" | "open" | "optimum" | "pattern" | "ping" | "placeholder" | "playsinline" | "poster" | "preload" | "readonly" | "referrerpolicy" | "rel" | "required" | "reversed" | "rows" | "rowspan" | "sandbox" | "scope" | "selected" | "shape" | "size" | "sizes" | "slot" | "span" | "spellcheck" | "src" | "srcdoc" | "srclang" | "srcset" | "start" | "step" | "style" | "tabindex" | "target" | "title" | "translate" | "type" | "usemap" | "value";
-
-type CSSPropertyName =
-    { [P in keyof CSSStyleDeclaration]: CSSStyleDeclaration[P] extends string ? P : never }[keyof CSSStyleDeclaration];
-
-type DOMEventHandler =
-    Omit<GlobalEventHandlers, "addEventListener" | "removeEventListener"> &
-    Omit<DocumentAndElementEventHandlers, "addEventListener" | "removeEventListener">;
-
-export type ElementSource = {
-    $?: AttributesSource | Cell<AttributesSource>;
-} & {
-    [P in keyof HTMLElementTagNameMap]?: NodeSource;
-};
-
-export type TextNodeSource =
-    string | number | boolean | null | undefined;
-
-export type DocumentFragmentSource = NodeSource[];
-
-export type NodeSource =
-    Node | TextNodeSource | DocumentFragmentSource | ElementSource | Cell<NodeSource>;
-
-export type AttrValue =
-    undefined | null | string | boolean | number | string[] | Cell<AttrValue> | StyleSource | DatasetSource | EventListener | EventListenerObject;
-
-export type StyleSource = {
-    [P in CSSPropertyName]: Cell<string | number | null> | string | number | null;
-};
-
-export type DatasetSource = {
-    [key: string]: Cell<string | number | null> | string | number | null;
-};
-
-export type AttributesSource =
-    { [P in HTMLAttrName]?: AttrValue; } & Partial<DOMEventHandler> & { [key : string]: AttrValue; };
-
-export type AttrSource =
-    AttributesSource | StyleSource | DatasetSource;
-
-export type JSHTMLSource =
-    NodeSource | AttrSource | AttrValue;
 
 const _empty = () => { };
 
@@ -65,8 +23,8 @@ const _run_continue = (callback: () => any) => {
 export class Transaction extends Array<Function> {
 
     static currentTransaction = new Transaction;
-    private static cellUpdates = [] as Function[];
-    private static endCallback = [] as Function[];
+    private static cellUpdates : Function[] = [];
+    private static endCallback : Function[] = [];
 
     static run<A>(callback: () => A): A {
         const execute = (f:Function[]) => { while(f.length) f.splice(0).forEach((f) => f()) };
@@ -190,16 +148,25 @@ export class Stream<A> implements Pushable {
 
     private _apply: (value: any) => A;
 
-    constructor(callback?: (value: any) => A) {
-        this._apply = typeof callback === 'function' ? callback : never._apply;
+    constructor(callback?: ((value: any) => A | Promise<A>) | Promise<A>) {
+        if (callback instanceof Promise) {
+            this._apply = Stream.PASS_THROUGH;
+            callback.then((v) => this[PUSH](v));
+        } else {
+            this._apply = typeof callback === 'function' ? callback : never._apply;
+        }
     }
 
-    [PUSH](value: any) {
-        try {
-            const r = this._apply(value);
-            Pipeline.getConnections(this).forEach(c => c[PUSH](r));
-        } catch (err) {
-            if (!(err instanceof StreamingError)) throw err;
+    [PUSH](value: any | Promise<any>) {
+        if (value instanceof Promise) {
+            value.then((v) => this[PUSH](v));
+        } else {
+            try {
+                const r = this._apply(value);
+                Pipeline.getConnections(this).forEach(c => c[PUSH](r));
+            } catch (err) {
+                if (!(err instanceof StreamingError)) throw err;
+            }
         }
     }
 
@@ -213,7 +180,7 @@ export class Stream<A> implements Pushable {
         return l;
     }
 
-    /**
+     /**
      * 一度きりの実行で登録を解除するListen
      * @param handler
      */
@@ -228,7 +195,7 @@ export class Stream<A> implements Pushable {
     /**
      * 自身の後に連結されるStreamを返す。
      */
-    map<B>(action: (arg: A) => B): Stream<B> {
+    map<B>(action: (arg: A) => B | Promise<B>): Stream<B> {
         const s = new Stream(action);
         Pipeline.connect(this, s);
         return s;
@@ -322,7 +289,6 @@ const never = new Stream<any>(() => { throw new StreamingError('never stream can
     });
 }
 
-
 export class Cell<A> implements Pushable {
 
     static switchC<A>(cell: Cell<Cell<A>>): Cell<A> {
@@ -336,7 +302,7 @@ export class Cell<A> implements Pushable {
     }
 
     static switchS<A>(cell: Cell<Stream<A>>): Stream<A> {
-        const s = new Stream(Stream.PASS_THROUGH);
+        const s = new Stream<A>(Stream.PASS_THROUGH);
         cell.listen((v) => {
             Pipeline.disconnect(cell.valueOf(), s);
             Pipeline.connect(v, s);
@@ -347,17 +313,21 @@ export class Cell<A> implements Pushable {
     private _value: A;
     private _stream: Stream<A>;
 
-    constructor(init: A, stream: Stream<A> = never) {
+    constructor(init: A, stream?: Stream<A>) {
         this._value = init;
-        this._stream = stream;
+        this._stream = stream instanceof Stream ? stream : never;
     }
 
     /**
      * 現在のトランザクション終了時に値が代入されるようにする。
      */
-    [PUSH](value: A): void {
-        Transaction.enqueueUpdateCell(() => this._value = value);
-        Pipeline.getConnections(this).forEach(c => c[PUSH](value));
+    [PUSH](value: A | Promise<A>): void {
+        if (value instanceof Promise) {
+            value.then((v) => this[PUSH](v));
+        } else {
+            Transaction.enqueueUpdateCell(() => this._value = value);
+            Pipeline.getConnections(this).forEach(c => c[PUSH](value));
+        }
     }
 
     /**
@@ -417,7 +387,6 @@ export class Cell<A> implements Pushable {
     }
 
 }
-
 
 export class StreamLoop<A> extends Stream<A> {
 
@@ -552,6 +521,7 @@ export class EventStream<E extends Event> extends StreamSink<E> implements Event
 
 }
 
+
 abstract class DoonObject {
     public ownerDocument?: DoonDocument;
     abstract contains(o: DoonObject) : boolean;
@@ -562,7 +532,7 @@ class DoonDocument {
 
     public originalDoc: Document;
     public rootNode: DoonNode;
-    public placeholder: [Comment,Cell<JSHTMLSource>][];
+    public placeholder: [Comment,Cell<JSHTMLSource>|Promise<NodeSource>][];
     protected connection: Map<DoonObject, Listener>;
     protected updated: [DoonObject,JSHTMLSource,JSHTMLSource][];
 
@@ -580,7 +550,7 @@ class DoonDocument {
 
     createNode(source: NodeSource) {
         // Cell to Comment
-        if (source instanceof Cell) {
+        if (source instanceof Cell || source instanceof Promise) {
             const comment = this.originalDoc.createComment('[PLACEHOLDER]');
             this.placeholder.push([comment, source]);
             return comment;
@@ -635,11 +605,11 @@ class DoonDocument {
                 elm.addEventListener(name.slice(2), <EventListenerOrEventListenerObject>value, false);
         }
         else if (Object(value) === value) {
-            if (name === 'class') {
+            if (name === 'classList') {
                 elm.className = Array.isArray(value)
                     ? value.filter(Boolean).join(" ")
                     : '' + value;
-            } else if (/^style|dataset$/.test(name)) {
+            } else if (/^(?:style|dataset)$/.test(name)) {
                 DoonDocument
                     .mergePropertyNames(value, old_value)
                     .map(name === 'style'
@@ -746,7 +716,7 @@ class DoonNode extends DoonObject {
         }
         if(!(target instanceof DoonNode) || !contains(this.range, target.range))
             return false;
-        // rangeが重なっていても、targetが祖先である可能性を弾く
+         // rangeが重なっていても、targetが祖先である可能性を弾く
         for(let c = this.parent; c; c = c.parent) if(c === target) return false;
         return true;
     }
@@ -765,7 +735,13 @@ class DoonNode extends DoonObject {
         while (doc.placeholder.length) {
             doc.placeholder
                 .splice(0)
-                .forEach(([n, source]) => doc.registerCell(new DoonNode(doc, n, this), source));
+                .forEach(([n, source]) => {
+                    if (source instanceof Cell) {
+                        doc.registerCell(new DoonNode(doc, n, this), source);
+                    } else if (source instanceof Promise) {
+                        source.then((s) => this.update(s));
+                    }
+                });
         }
 
     }
@@ -840,9 +816,6 @@ class DoonStyleValue extends DoonAttr {
             this.element.style.setProperty(this.name, value + '');
     }
 
-    /**
-     * キャメルからハイフン区切りに変換する(ex: zIndex -> z-index)
-     */
     static camelToHyphenSeparated(str: string) {
         return str.replace(/[A-Z]/g, (s: string) => '-' + s.toLowerCase());
     }
@@ -864,23 +837,47 @@ class DoonDatasetValue extends DoonAttr {
 
 }
 
-export abstract class Component extends HTMLElement {
+class AttrChangedInfo extends String {
+    public name;
+    public oldValue;
+    constructor(name:string,oldValue:string,newValue:string) {
+        super(newValue);
+        this.name = name;
+        this.oldValue = oldValue;
+    }
+}
 
+export interface DoonComponent extends HTMLElement {
+    attrChanged : { [key:string]: Stream<AttrChangedInfo> };
+    shadowEvents: { [key:string]: Stream<Event> };
+    shadowDocument : DoonDocument;
+    render() : NodeSource;
+    updateShadow(source: NodeSource) : void;
+}
+
+export interface DoonComponentConstructor extends CustomElementConstructor {
+    new(): DoonComponent;
+    observedAttributes?: string[];
+    observedEvents?: string[];
+    prototype: DoonComponent;
+}
+
+export abstract class Component extends HTMLElement implements DoonComponent {
+    
     abstract render() : NodeSource;
 
-    public events: EventStream<Event>;
+    public attrChanged : { [key:string]: Stream<AttrChangedInfo> };
+    public shadowEvents: { [key:string]: Stream<Event> };
     public shadowDocument : DoonDocument;
-
     constructor() {
         super();
-        this.events = new EventStream;
-        const shadow = this.attachShadow({ mode : "closed" });
-        const events = (<{observedEvents:string[]}><unknown>this.constructor).observedEvents;
-        if(Array.isArray(events))
-            events.forEach((e) => shadow.addEventListener(e, this.events));
-        this.shadowDocument = new DoonDocument(shadow);
-		if(Array.isArray((<{observedAttributes:string[]}><unknown>this.constructor).observedAttributes))
-			this.addEventListener('hostattrchanged', this.events, true);
+        this.shadowEvents = {};
+        this.attrChanged = {};
+        this.shadowDocument = Component.initShadow(this);
+    }
+
+    attributeChangedCallback(name: string, oldValue: string, newValue: string) {
+        (<StreamSink<AttrChangedInfo>>this.attrChanged[name]).send(new AttrChangedInfo(name,oldValue,newValue));
     }
 
     connectedCallback() {
@@ -891,13 +888,21 @@ export abstract class Component extends HTMLElement {
         this.updateShadow(null);
     }
 
-    attributeChangedCallback(name: string, oldValue: string, newValue: string) {
-		this.dispatchEvent(new CustomEvent('hostattrchanged', { detail: { name:name,oldValue:oldValue,newValue:newValue } }));
-    }
-
     updateShadow(source: NodeSource) {
         this.shadowDocument.rootNode.update(source);
 		this.dispatchEvent(new CustomEvent('shadowupdated', { bubbles: true }));
+    }
+
+    static initShadow(element: DoonComponent) {
+        const shadow = element.attachShadow({ mode : "open" });
+        const events = (<{observedEvents:string[]}><unknown>element.constructor).observedEvents;
+        if(Array.isArray(events))
+            events.forEach((e) => shadow.addEventListener(e, (element.shadowEvents[e] = new EventStream())));
+        
+        const attrs = (<{observedAttributes:string[]}><unknown>element.constructor).observedAttributes;
+        if(Array.isArray(attrs))
+            attrs.forEach((e) => element.attrChanged[e] = new StreamSink());
+        return new DoonDocument(shadow);
     }
 
 }
