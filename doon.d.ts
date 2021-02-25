@@ -215,22 +215,7 @@ declare class AttrChangedInfo extends String {
     constructor(name:string,oldValue:string,newValue:string);
 }
 
-interface DoonComponent extends HTMLElement {
-    attrChanged : { [key:string]: Stream<AttrChangedInfo> };
-    shadowEvents: { [key:string]: Stream<Event> };
-    shadowDocument : DoonDocument;
-    render() : NodeSource;
-    updateShadow(source: NodeSource) : void;
-}
-
-interface DoonComponentConstructor extends CustomElementConstructor {
-    new(): DoonComponent;
-    observedAttributes?: string[];
-    observedEvents?: string[];
-    prototype: DoonComponent;
-}
-
-declare abstract class Component extends HTMLElement implements DoonComponent {
+declare abstract class Component extends HTMLElement {
     
     abstract render() : NodeSource;
 
@@ -238,10 +223,8 @@ declare abstract class Component extends HTMLElement implements DoonComponent {
     public shadowEvents: { [key:string]: Stream<Event> };
     public shadowDocument : DoonDocument;
 
-    attributeChangedCallback(name: string, oldValue: string, newValue: string) : void;
-    connectedCallback(): void;
-    disconnectedCallback() : void;
-    updateShadow(source: NodeSource) : void;
-
+    public attributeChangedCallback(name: string, oldValue: string, newValue: string) : void;
+    public connectedCallback(): void;
+    public disconnectedCallback() : void;
 }
 
