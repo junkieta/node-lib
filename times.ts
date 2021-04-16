@@ -2,8 +2,6 @@
  * PHP::DateTimeと近い感覚で時間所法を処理するためのライブラリ。
  **/
 
-import { match } from "assert";
-
 /**
  * like PHP:DateTime
  * */
