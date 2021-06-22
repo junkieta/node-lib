@@ -1,19 +1,68 @@
 
+interface Listener {
+   append(that: Listener): Listener;
+   unlisten(): void;
+}
 
-/**
- * Cell
- * */
-interface CellInterface<T> {
+
+interface Stream<A> {
+
+    constructor(callback?: ((value: any) => A | Promise<A>) | Promise<A>): void;
+    /**
+     * 値の受け取りを監視するListenerを返す。
+     * @param handler
+     */
+    listen(handler: (value: A) => void): Listener;
+
+     /**
+     * 一度きりの実行で登録を解除するListen
+     * @param handler
+     */
+    listenOnce(handler: (value: A) => void): Listener;
 
     /**
-     * 格納中の値を返す。sodium で言うところのsample()。
+     * 自身の後に連結されるStreamを返す。
      */
-    valueOf() : T;
+    map<B>(action: (arg: A) => B | Promise<B>): Stream<B>;
 
-   /**
+    /**
+     * 定数値ストリームに変換する
+     * @param b
+     */
+    mapTo<B>(b: B) : Stream<B>;
+
+    /*
+     * 値を受け取るセルを生成する。引数は初期値。
+     */
+    hold(init: A): Cell<A>;
+
+    /**
+     * 複数のStreamを一つのStreamにまとめる
+     * @param that
+     * @param lambda
+     */
+    merge(that: Stream<A> | Stream<A>[], lambda: (...values: A[]) => A): Stream<A>;
+
+    /**
+     * predicateからtrueを返された値だけ受け取るStreamを生成する。
+     */
+    filter(predicate: A|RegExp|((value: A) => boolean)|any): Stream<A>;
+
+    /**
+     * 自身からcellの値を受け取るStreamを生成する。
+     */
+    snapshot<B,C>(c: Cell<B>, action: (a: A, b: B) => C): Stream<C>;
+    snapshot<C>(c: Cell<any>[], action: (...values: any[]) => C): Stream<C>;
+    snapshot<B,C>(cell: Cell<B> | Cell<any>[], action?: (...values: any[]) => C): Stream<C>;
+
+}
+
+interface Cell<A> {
+
+    /**
      * listenerを登録する。Streamとは違い、初期値があるので即座に一度発火する。
      */
-    listen(fn:Function) : { unlisten() : void; };
+    listen(action: (v: A) => void): Listener;
 
     /**
      * 別のセルに自身の値をマッピングする。
@@ -29,76 +78,20 @@ interface CellInterface<T> {
     lift<R,B,C,D,E>(that: Cell<B>|[Cell<B>,Cell<C>,Cell<D>,Cell<E>], lambda: (a:A,b:B,c:C,d:D,e:E) => R): Cell<R>;
     lift<R>(that: Cell<any> | Cell<any>[], lambda: (a:A,...b:any[]) => R): Cell<R>;
 
-}
-
-
-/**
- * listenから返されるオブジェクト。
- * */
-interface ListenerInterface {
-    append(that: ListenerInterface): ListenerInterface;
-    unlisten() : void;
-}
-
-interface StreamInterface<A> {
-
     /**
-     * 値の受け取りを監視するListenerを返す。
-     * @param handler
+     * 格納中の値を返す。sodium で言うところのsample()。
      */
-    listen(handler: (value: A) => void): ListenerInterface;
-
-     /**
-     * 一度きりの実行で登録を解除するListen
-     * @param handler
-     */
-    listenOnce(handler: (value: A) => void): ListenerInterface;
-
-    /**
-     * 自身の後に連結されるStreamを返す。
-     */
-    map<B>(action: (arg: A) => B | Promise<B>): StreamInterface<B>;
-
-    /**
-     * 定数値ストリームに変換する
-     * @param b
-     */
-    mapTo<B>(b: B) : StreamInterface<B>;
-
-    /*
-     * 値を受け取るセルを生成する。引数は初期値。
-     */
-    hold(init: A): CellInterface<A>;
-
-    /**
-     * 複数のStreamを一つのStreamにまとめる
-     * @param that
-     * @param lambda
-     */
-    merge(that: StreamInterface<A> | StreamInterface<A>[], lambda: (...values: A[]) => A): StreamInterface<A>;
-
-    /**
-     * predicateからtrueを返された値だけ受け取るStreamを生成する。
-     */
-    filter(predicate: A): StreamInterface<A>;
-    filter(predicate: RegExp): StreamInterface<A>;
-    filter(predicate: (value: A) => boolean): StreamInterface<A>;
-    filter(predicate: any): StreamInterface<A>;
-
-    /**
-     * 自身からcellの値を受け取るStreamを生成する。
-     */
-    snapshot<B,C>(c: CellInterface<B>, action: (a: A, b: B) => C): StreamInterface<C>;
-    snapshot<C>(c: CellInterface<any>[], action: (...values: any[]) => C): StreamInterface<C>;
-    snapshot<B,C>(cell: CellInterface<B> | CellInterface<any>[], action?: (...values: any[]) => C): StreamInterface<C>;
+    valueOf(): A;
+    toString(): string;
 
 }
-
 
 interface WebComponentConstructor extends CustomElementConstructor {
     tag: string;
+    shadowOpen: boolean;
+    prefix?: string;
     observedAttributes?: string[];
-    observedEvents?: string[];
+    observedMutation?: MutationObserverInit;
 }
 
 interface WebComponentClass {
@@ -191,6 +184,8 @@ type DOMEventHandler = Partial<{
     onselect: DOMEventHandlerExpr<Event>;
     onselectionchange: DOMEventHandlerExpr<Event>;
     onselectstart: DOMEventHandlerExpr<Event>;
+    // lib.dom.d.tsに存在しないため追加
+    onslotchange: DOMEventHandlerExpr<Event>;
     onstalled: DOMEventHandlerExpr<Event>;
     onsubmit: DOMEventHandlerExpr<Event>;
     onsuspend: DOMEventHandlerExpr<Event>;
@@ -210,11 +205,11 @@ type DOMEventHandler = Partial<{
 }>;
 
 type ElementSource = {
-    $?: AttributesSource | CellInterface<AttributesSource>;
+    $?: AttributesSource | Cell<AttributesSource>;
 } & {
     [P in keyof HTMLElementTagNameMap]?: NodeSource;
 } | {
-    [key: string]: NodeSource | AttributesSource | CellInterface<AttributesSource>;
+    [key: string]: NodeSource | AttributesSource | Cell<AttributesSource>;
 };
 
 type DOMStringSource = string | number | boolean | null | undefined | { toString() : string };
@@ -225,26 +220,26 @@ type CSSSelectorSource =
     string | string[];
 
 type CSSRuleSource =
-    string | [CSSPropertyName, TextNodeSource] | CellInterface<CSSRuleSource>;
+    string | [CSSPropertyName, TextNodeSource] | Cell<CSSRuleSource>;
 
 type CSSTextSource =
-    string | null | undefined | [CSSSelectorSource, CSSRuleSource][] | Map<CSSSelectorSource, CSSRuleSource> | CellInterface<CSSTextSource>;
+    string | null | undefined | [CSSSelectorSource, CSSRuleSource][] | Map<CSSSelectorSource, CSSRuleSource> | Cell<CSSTextSource>;
 
 type DocumentFragmentSource =
     NodeSource[];
 
 type NodeSource =
-    Node | TextNodeSource | DocumentFragmentSource | ElementSource | CellInterface<NodeSource> | Promise<NodeSource>;
+    Node | TextNodeSource | DocumentFragmentSource | ElementSource | Cell<NodeSource> | Promise<NodeSource>;
 
 type AttrValue =
-    DOMStringSource | string[] | DOMEventHandler[keyof DOMEventHandler] | StyleSource | DatasetSource | Promise<AttrValue> | CellInterface<AttrValue>;
+    DOMStringSource | string[] | DOMEventHandler[keyof DOMEventHandler] | StyleSource | DatasetSource | Promise<AttrValue> | Cell<AttrValue>;
 
 type StyleSource = {
-    [P in CSSPropertyName]: CellInterface<DOMStringSource> | DOMStringSource;
+    [P in CSSPropertyName]: Cell<DOMStringSource> | DOMStringSource;
 };
 
 type DatasetSource = {
-    [key: string]: CellInterface<DOMStringSource> | DOMStringSource;
+    [key: string]: Cell<DOMStringSource> | DOMStringSource;
 };
 
 type AttributesSource =
@@ -257,91 +252,124 @@ type JSHTMLSource =
     NodeSource | AttrSource | AttrValue;
 
 type ShadowEventMap = {
-    "abort": StreamInterface<UIEvent>;
-    "animationcancel": StreamInterface<AnimationEvent>;
-    "animationend": StreamInterface<AnimationEvent>;
-    "animationiteration": StreamInterface<AnimationEvent>;
-    "animationstart": StreamInterface<AnimationEvent>;
-    "auxclick": StreamInterface<MouseEvent>;
-    "blur": StreamInterface<FocusEvent>;
-    "cancel": StreamInterface<Event>;
-    "canplay": StreamInterface<Event>;
-    "canplaythrough": StreamInterface<Event>;
-    "change": StreamInterface<Event>;
-    "click": StreamInterface<MouseEvent>;
-    "close": StreamInterface<Event>;
-    "contextmenu": StreamInterface<MouseEvent>;
-    "cuechange": StreamInterface<Event>;
-    "dblclick": StreamInterface<MouseEvent>;
-    "drag": StreamInterface<DragEvent>;
-    "dragend": StreamInterface<DragEvent>;
-    "dragenter": StreamInterface<DragEvent>;
-    "dragexit": StreamInterface<Event>;
-    "dragleave": StreamInterface<DragEvent>;
-    "dragover": StreamInterface<DragEvent>;
-    "dragstart": StreamInterface<DragEvent>;
-    "drop": StreamInterface<DragEvent>;
-    "durationchange": StreamInterface<Event>;
-    "emptied": StreamInterface<Event>;
-    "ended": StreamInterface<Event>;
-    "error": StreamInterface<ErrorEvent>;
-    "focus": StreamInterface<FocusEvent>;
-    "focusin": StreamInterface<FocusEvent>;
-    "focusout": StreamInterface<FocusEvent>;
-    "gotpointercapture": StreamInterface<PointerEvent>;
-    "input": StreamInterface<Event>;
-    "invalid": StreamInterface<Event>;
-    "keydown": StreamInterface<KeyboardEvent>;
-    "keypress": StreamInterface<KeyboardEvent>;
-    "keyup": StreamInterface<KeyboardEvent>;
-    "load": StreamInterface<Event>;
-    "loadeddata": StreamInterface<Event>;
-    "loadedmetadata": StreamInterface<Event>;
-    "loadstart": StreamInterface<Event>;
-    "lostpointercapture": StreamInterface<PointerEvent>;
-    "mousedown": StreamInterface<MouseEvent>;
-    "mouseenter": StreamInterface<MouseEvent>;
-    "mouseleave": StreamInterface<MouseEvent>;
-    "mousemove": StreamInterface<MouseEvent>;
-    "mouseout": StreamInterface<MouseEvent>;
-    "mouseover": StreamInterface<MouseEvent>;
-    "mouseup": StreamInterface<MouseEvent>;
-    "pause": StreamInterface<Event>;
-    "play": StreamInterface<Event>;
-    "playing": StreamInterface<Event>;
-    "pointercancel": StreamInterface<PointerEvent>;
-    "pointerdown": StreamInterface<PointerEvent>;
-    "pointerenter": StreamInterface<PointerEvent>;
-    "pointerleave": StreamInterface<PointerEvent>;
-    "pointermove": StreamInterface<PointerEvent>;
-    "pointerout": StreamInterface<PointerEvent>;
-    "pointerover": StreamInterface<PointerEvent>;
-    "pointerup": StreamInterface<PointerEvent>;
-    "progress": StreamInterface<ProgressEvent>;
-    "ratechange": StreamInterface<Event>;
-    "reset": StreamInterface<Event>;
-    "resize": StreamInterface<UIEvent>;
-    "scroll": StreamInterface<Event>;
-    "securitypolicyviolation": StreamInterface<SecurityPolicyViolationEvent>;
-    "seeked": StreamInterface<Event>;
-    "seeking": StreamInterface<Event>;
-    "select": StreamInterface<Event>;
-    "selectionchange": StreamInterface<Event>;
-    "selectstart": StreamInterface<Event>;
-    "stalled": StreamInterface<Event>;
-    "submit": StreamInterface<Event>;
-    "suspend": StreamInterface<Event>;
-    "timeupdate": StreamInterface<Event>;
-    "toggle": StreamInterface<Event>;
-    "touchcancel": StreamInterface<TouchEvent>;
-    "touchend": StreamInterface<TouchEvent>;
-    "touchmove": StreamInterface<TouchEvent>;
-    "touchstart": StreamInterface<TouchEvent>;
-    "transitioncancel": StreamInterface<TransitionEvent>;
-    "transitionend": StreamInterface<TransitionEvent>;
-    "transitionrun": StreamInterface<TransitionEvent>;
-    "transitionstart": StreamInterface<TransitionEvent>;
-    "volumechange": StreamInterface<Event>;
-    "waiting": StreamInterface<Event>;
-    "wheel": StreamInterface<WheelEvent>;
-} & { [key:string]: StreamInterface<Event> };
+    abort: Stream<UIEvent>;
+    animationcancel: Stream<AnimationEvent>;
+    animationend: Stream<AnimationEvent>;
+    animationiteration: Stream<AnimationEvent>;
+    animationstart: Stream<AnimationEvent>;
+    auxclick: Stream<MouseEvent>;
+    blur: Stream<FocusEvent>;
+    cancel: Stream<Event>;
+    canplay: Stream<Event>;
+    canplaythrough: Stream<Event>;
+    change: Stream<Event>;
+    click: Stream<MouseEvent>;
+    close: Stream<Event>;
+    contextmenu: Stream<MouseEvent>;
+    cuechange: Stream<Event>;
+    dblclick: Stream<MouseEvent>;
+    drag: Stream<DragEvent>;
+    dragend: Stream<DragEvent>;
+    dragenter: Stream<DragEvent>;
+    dragexit: Stream<Event>;
+    dragleave: Stream<DragEvent>;
+    dragover: Stream<DragEvent>;
+    dragstart: Stream<DragEvent>;
+    drop: Stream<DragEvent>;
+    durationchange: Stream<Event>;
+    emptied: Stream<Event>;
+    ended: Stream<Event>;
+    error: Stream<ErrorEvent>;
+    focus: Stream<FocusEvent>;
+    focusin: Stream<FocusEvent>;
+    focusout: Stream<FocusEvent>;
+    gotpointercapture: Stream<PointerEvent>;
+    input: Stream<Event>;
+    invalid: Stream<Event>;
+    keydown: Stream<KeyboardEvent>;
+    keypress: Stream<KeyboardEvent>;
+    keyup: Stream<KeyboardEvent>;
+    load: Stream<Event>;
+    loadeddata: Stream<Event>;
+    loadedmetadata: Stream<Event>;
+    loadstart: Stream<Event>;
+    lostpointercapture: Stream<PointerEvent>;
+    mousedown: Stream<MouseEvent>;
+    mouseenter: Stream<MouseEvent>;
+    mouseleave: Stream<MouseEvent>;
+    mousemove: Stream<MouseEvent>;
+    mouseout: Stream<MouseEvent>;
+    mouseover: Stream<MouseEvent>;
+    mouseup: Stream<MouseEvent>;
+    pause: Stream<Event>;
+    play: Stream<Event>;
+    playing: Stream<Event>;
+    pointercancel: Stream<PointerEvent>;
+    pointerdown: Stream<PointerEvent>;
+    pointerenter: Stream<PointerEvent>;
+    pointerleave: Stream<PointerEvent>;
+    pointermove: Stream<PointerEvent>;
+    pointerout: Stream<PointerEvent>;
+    pointerover: Stream<PointerEvent>;
+    pointerup: Stream<PointerEvent>;
+    progress: Stream<ProgressEvent>;
+    ratechange: Stream<Event>;
+    reset: Stream<Event>;
+    resize: Stream<UIEvent>;
+    scroll: Stream<Event>;
+    securitypolicyviolation: Stream<SecurityPolicyViolationEvent>;
+    seeked: Stream<Event>;
+    seeking: Stream<Event>;
+    select: Stream<Event>;
+    selectionchange: Stream<Event>;
+    selectstart: Stream<Event>;
+    stalled: Stream<Event>;
+    // lib.dom.d.tsに存在しないため追加
+    slotchange: Stream<Event>;
+    submit: Stream<Event>;
+    suspend: Stream<Event>;
+    timeupdate: Stream<Event>;
+    toggle: Stream<Event>;
+    touchcancel: Stream<TouchEvent>;
+    touchend: Stream<TouchEvent>;
+    touchmove: Stream<TouchEvent>;
+    touchstart: Stream<TouchEvent>;
+    transitioncancel: Stream<TransitionEvent>;
+    transitionend: Stream<TransitionEvent>;
+    transitionrun: Stream<TransitionEvent>;
+    transitionstart: Stream<TransitionEvent>;
+    volumechange: Stream<Event>;
+    waiting: Stream<Event>;
+    wheel: Stream<WheelEvent>;
+} & { [key:string]: Stream<Event> };
+
+
+declare class VDOMConnection extends Map<VDOMObject, Listener> {
+    registerCell(ctx: VDOMObject, cell: Cell<JSHTMLSource>) : void;
+    unregisterCell(ctx: VDOMObject) : void;
+    garbageCollect(root: VDOMObject): void;
+    reserveCellUpdate(upd: VDOMUpdateHistory): void;
+    applyVDOMUpdate(upd: VDOMUpdateHistory[]):void;
+}
+
+declare abstract class VDOMObject {
+    abstract point : PointReference;
+    abstract contains(o: VDOMObject) : boolean;
+    abstract update(value: JSHTMLSource, old_value: JSHTMLSource) : void;
+    protected registerCell(cell: Cell<JSHTMLSource>): void;
+}
+
+type VDOMUpdateHistory = {
+    target: VDOMObject;
+    newValue: JSHTMLSource;
+    oldValue?: JSHTMLSource;
+};
+
+type VDOMPlaceholder = [Comment,Cell<NodeSource>];
+
+type BuildVDOMResult = {
+    result: Comment | Text | HTMLElement | DocumentFragment;
+    placeholders: VDOMPlaceholder[];
+};
+
+type PointReference = Node | [Node,Node];
