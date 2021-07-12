@@ -1,114 +1,172 @@
 ///<reference path="./virtue.d.ts" />
 
-const _empty = () => { };
+import { start } from "repl";
+
+const _empty = () => {};
 
 const PUSH : unique symbol = Symbol('PUSH');
-
-// lift,CellSink,StreamSinkによるプッシュを実装するための関数。
-const _run_continue = (callback: () => any) => {
-    const action = () => Transaction.currentTransaction.push(callback);
-    if (Transaction.currentTransaction.running)
-        action();
-    else
-        Transaction.run(action);
-};
+const VALUE: unique symbol = Symbol('VALUE');
+const INPUT: unique symbol = Symbol('INPUT');
 
 type Output = Stream<unknown>|Cell<unknown>|Listener;
 
-const _connections = new WeakMap<Stream<unknown>, Output | Output[]>();
-const _updated = new Map<Cell<unknown>, unknown>();
+export const Operational = {
 
-function _connect(a: Stream<unknown>, b: Output) {
-    const current = _connections.get(a);
-    if (!current) {
-        _connections.set(a,b);
-    } else if (Array.isArray(current)) {
-        if (current.find((c) => c === b)) return;
-        _connections.set(a, current.concat(b));
-    } else if (current !== b) {
-        _connections.set(a, [current, b]);
+    _addTransaction(...fn: (()=>void)[]) {
+        const tr = Transaction.currentTransaction;
+        tr.splitted = tr.splitted ? tr.splitted.concat(fn) : fn;
+    },
+
+    updates<A>(c: Cell<A>): Stream<A> {
+        return c[INPUT];
+    },
+
+    defer<A>(s: Stream<A>) : Stream<A> {
+        const defered = s.map((v) => {
+            let started = false;
+            this._addTransaction(() => {
+                started = true;
+                StreamPipe.flow(defered, v);
+                started = false;
+            });
+            if(!started) throw new StreamingError();
+            return v;
+        });
+        return defered;
+    },
+
+    split<A>(s: Stream<A[]>) : Stream<A> {
+        const splitted = s.map(([v,...values]) => {
+            if (values.length)
+                this._addTransaction(...values.map((v) => () => StreamPipe.flow(splitted, v)));
+            return v;
+        });
+        return splitted;
     }
-}
-
-function _disconnect(source: Stream<unknown>, destination: Output) {
-    if (!_connections.has(source)) return;
-    const current = _connections.get(source);
-    if (!Array.isArray(current)) {
-        if (current === destination)
-            _connections.delete(source);
-        return;
-    }
-    const i = current.indexOf(destination);
-    if (i === -1) return;
-    current.splice(i, 1);
-    if (current.length === 1)
-        _connections.set(source, current[0]);
-    else if (!current.length)
-        _connections.delete(source);
-}
-
-const _flow = (dest: Stream<unknown>, input: unknown | Promise<unknown>) => {
-    if(input instanceof Promise) {
-        input.then((v) => _flow(dest, v));
-        return;
-    }
-
-    let result: unknown;
-    try {
-        result = dest[PUSH](input);
-    } catch (err) {
-        if(err instanceof StreamingError) return;
-        throw err;
-    }
-
-    let next = _connections.get(dest);
-    if(!next) return;
-    if(!Array.isArray(next)) next = [next];
-
-    next.forEach((d) => {
-        if (d instanceof Listener)
-            d[PUSH](result);
-        else if (d instanceof Cell)
-            _updated.set(d, result);
-        else
-            _flow(d, result);
-    });
 
 };
 
-export class Transaction extends Array<Function> {
+const StreamPipe = {
+
+    streams: new WeakMap<Stream<unknown>, Output | Output[]>(),
+
+    connect(a: Stream<unknown>, b: Output) {
+        const current = this.streams.get(a);
+        if (!current) {
+            this.streams.set(a,b);
+        } else if (Array.isArray(current)) {
+            if (current.find((c) => c === b)) return;
+            this.streams.set(a, current.concat(b));
+        } else if (current !== b) {
+            this.streams.set(a, [current, b]);
+        }
+    },
+
+    disconnect(source: Stream<unknown>, destination: Output) {
+        if (!this.streams.has(source)) return;
+        const current = this.streams.get(source);
+        if (!Array.isArray(current)) {
+            if (current === destination)
+                this.streams.delete(source);
+            return;
+        }
+        const i = current.indexOf(destination);
+        if (i === -1) return;
+        current.splice(i, 1);
+        if (current.length === 1)
+            this.streams.set(source, current[0]);
+        else if (!current.length)
+            this.streams.delete(source);
+    },
+
+    flow(dest: Stream<unknown>, input: unknown) {
+        let result: unknown;
+        try {
+            result = dest[PUSH](input);
+        } catch (err) {
+            if(err instanceof StreamingError) return;
+            throw err;
+        }
+
+        let next = this.streams.get(dest);
+        if(Array.isArray(next))
+            next.forEach((out) => this.push(out, result));
+        else if(next)
+            this.push(next, result);
+
+    },
+
+    push(output: Output, value: unknown) {
+        if (output instanceof Listener)
+            output[PUSH](value);
+        else if (output instanceof Cell)
+            Transaction.currentTransaction.updated.set(output, value);
+        else
+            this.flow(output, value);
+    }
+
+    
+}
+
+
+export class Transaction {
 
     static currentTransaction = new Transaction();
-    
-    private static endCallback : Function[] = [];
 
     static run<A>(callback: () => A): A {
         const tr_previous = Transaction.currentTransaction;
+
+        // Transactionスタート
         const tr = Transaction.currentTransaction = new Transaction();
-
         tr.running = true;
-        const result = callback();
-        while(tr.length) tr.splice(0).forEach((f) => f());
-        if (_updated.size) Cell._applyUpdate(_updated);
-        if (CellLoop._waiting.size || StreamLoop._waiting.size)
-           throw new Error('StreamLoop と CellLoop はトランザクションの終了前に loop メソッドを呼び出す必要があります');
-        tr.running = false;
 
+        // runnable実行
+        const result = callback();
+
+        // TransactionのStream処理はここで完結させる
+        while (tr.flowing.length) {
+            tr.flowing.splice(0).forEach((f) => f());
+        }
+        
+        // Streamの処理終了時点でloopのチェック
+        if (tr.waiting.size)
+           throw new Error('StreamLoop と CellLoop はトランザクションの終了前に loop メソッドを呼び出す必要があります');
+
+        // Cell更新処理
+        if (tr.updated.size)
+            tr.updated.forEach((v,c) => c[VALUE] = v);
+        tr.updated.clear();
+
+        // Transactionエンド
+        tr.running = false;
         Transaction.currentTransaction = tr_previous;
+        
+        // 予約済みのTrarnsactionを実行
+        if (tr.splitted)
+            tr.splitted.splice(0).forEach((f) => Transaction.run(f));
+
         return result;
     }
 
-    static onTransactionEnd(callback: Function) {
-        Transaction.endCallback.push(callback);
+    [PUSH](f: () => unknown) {
+        this.flowing.push(f);
     }
 
     public running: boolean;
+    public listening: boolean;
+    public updated: Map<Cell<unknown>, unknown>;
+    public waiting: Set<StreamLoop<unknown>|CellLoop<unknown>>;
+    public splitted?: (()=>unknown)[];
+    public flowing: (()=>unknown)[];
 
     constructor() {
-        super();
         this.running = false;
+        this.listening = false;
+        this.updated = new Map();
+        this.waiting = new Set();
+        this.flowing = [];
     }
-
+ 
 }
 
 
@@ -117,12 +175,20 @@ export class Transaction extends Array<Function> {
  * */
 export class Listener {
 
-    private _unlisten: Function;
-    [PUSH]: (v: any) => void;
+    private _dispose: Function;
+    private _apply : Function;
 
-    constructor(f1?: (v: any) => void, f2?: Function) {
-        this[PUSH] = f1 || _empty;
-        this._unlisten = f2 || _empty;
+    constructor(f1?: Function, f2?: Function) {
+        this._apply = f1 || _empty;
+        this._dispose = f2 || _empty;
+    }
+
+    [PUSH](value: unknown) {
+        const tr = Transaction.currentTransaction;
+        if(tr.listening) throw new Error('listnerの処理中に別のListenerが呼び出されることはありえません');
+        tr.listening = true;
+        this._apply(value);
+        tr.listening = false;
     }
 
     append(that: Listener): Listener {
@@ -133,8 +199,8 @@ export class Listener {
     }
 
     unlisten() {
-        this._unlisten();
-        this[PUSH] = this._unlisten = _empty;
+        this._dispose();
+        this._apply = this._dispose = _empty;
     }
 
 }
@@ -152,13 +218,8 @@ export class Stream<A> {
 
     [PUSH]: (value: any) => A;
 
-    constructor(callback?: ((value: any) => A | Promise<A>) | Promise<A>) {
-        if (callback instanceof Promise) {
-            this[PUSH] = Stream.PASS_THROUGH;
-            callback.then((v) => this[PUSH](v));
-        } else {
-            this[PUSH] = typeof callback === 'function' ? callback : never[PUSH];
-        }
+    constructor(callback?: (value: any) => A) {
+        this[PUSH] = typeof callback === 'function' ? callback : _never[PUSH];
     }
 
     /**
@@ -166,8 +227,8 @@ export class Stream<A> {
      * @param handler
      */
     listen(handler: (value: A) => void): Listener {
-        const l = new Listener(handler, () => _disconnect(this, l));
-        _connect(this, l);
+        const l = new Listener(handler, () => StreamPipe.disconnect(this, l));
+        StreamPipe.connect(this, l);
         return l;
     }
 
@@ -186,9 +247,9 @@ export class Stream<A> {
     /**
      * 自身の後に連結されるStreamを返す。
      */
-    map<B>(action: (arg: A) => B | Promise<B>): Stream<B> {
+    map<B>(action: (arg: A) => B): Stream<B> {
         const s = new Stream(action);
-        _connect(this, s);
+        StreamPipe.connect(this, s);
         return s;
     }
 
@@ -205,7 +266,7 @@ export class Stream<A> {
      */
     hold(init: A): Cell<A> {
         const c = new Cell(init, this);
-        _connect(this, c);
+        StreamPipe.connect(this, c);
         return c;
     }
 
@@ -214,22 +275,21 @@ export class Stream<A> {
      * @param that
      * @param lambda
      */
-    merge(that: Stream<A> | Stream<A>[], lambda: (...values: A[]) => A = Stream.PASS_THROUGH): Stream<A> {
+    merge(that: Stream<A> | Stream<A>[], lambda: (a:A,b:A) => A = Stream.PASS_THROUGH): Stream<A> {
         const inputs = ([this] as Stream<A>[]).concat(that);
         const merged = new Stream<A>(Stream.PASS_THROUGH);
-        const EMPTY = Symbol('EMPTY');
-        const values: Array<A | Symbol> = Array(inputs.length).fill(EMPTY);
-        const action = () =>
-            merged[PUSH](
-                lambda(...<A[]>values
-                    .splice(0, values.length, ...Array(values.length).fill(EMPTY))
-                    .filter((v) => v !== EMPTY)));
 
-        inputs.forEach((s, i) => s.listen((v) => {
-            const run_flag = values.every((v) => v === EMPTY);
-            values[i] = v;
-            if (run_flag) _run_continue(action);
-        }));
+        let values : A[] = [];
+        const replace_value = (v:A) => {
+            if (values.length) {
+                values = [values.concat(v).reduce(lambda)];
+            } else {
+                values = [v];
+                Transaction.currentTransaction[PUSH](() => StreamPipe.flow(merged, ...(<[A]>values.splice(0))));
+            }
+        };
+
+        inputs.forEach((s) => s.listen(replace_value));
         return merged;
     }
 
@@ -256,23 +316,46 @@ export class Stream<A> {
     /**
      * 自身からcellの値を受け取るStreamを生成する。
      */
-    snapshot<B,C>(c: Cell<B>, action: (a: A, b: B) => C): Stream<C>;
-    snapshot<C>(c: Cell<any>[], action: (...values: any[]) => C): Stream<C>;
-    snapshot<B,C>(cell: Cell<B> | Cell<any>[], action?: (...values: any[]) => C): Stream<C> {
-        const cell_list = Array.isArray(cell) ? cell : [cell];
-        const get_cell_value = () => cell_list.map((c) => c.valueOf());
-        return typeof action === 'function'
-            ? this.map((v) => action(v, ...get_cell_value()))
-            : cell_list.length > 1
-                ? this.map(() => <C> <unknown> get_cell_value())
-                : this.map(() => <C> cell.valueOf());
+    snapshot<B,C>(cell: Cell<B>, action?: (a:A,b:B) => C): Stream<C>
+    snapshot<B,C>(cell: Cell<B> | Cell<unknown>[], action?: (a:A, ...values: unknown[]) => C): Stream<C> {
+        if (!Array.isArray(cell)) 
+            return this.map(action
+                ? (v) => action(v, cell.sample())
+                : () => <C><unknown>cell.sample());
+
+        const sample = () => cell.map((c) => c.sample());
+        return this.map(action
+            ? (v) => action(v, ...sample())
+            : <()=>C><()=>unknown> sample);
+    }
+
+    accum<S>(state: S, f: (value:A,state:S) => S) : Cell<S> {
+        return Transaction.run(() => {
+            const ref = new CellLoop<S>();
+            const stream = this.snapshot(ref, f);
+            ref.loop(stream.hold(state));
+            return ref;
+        });
+    }
+
+    collect<B,S>(state: S, f: (a:A,s:S) => [B,S]) {
+        let current_state = state;
+        return this.map((v) => {
+            const [next, next_state] = f(v, current_state);
+            current_state = next_state;
+            return next;
+        });
+    }
+
+    toString() {
+        return `[object Stream]`;
     }
 
 }
 
-const never = new Stream<any>(() => { throw new StreamingError('never stream cannot [PUSH]') }); {
-    const descriptor_return_never = { value: () => never };
-    Object.defineProperties(never, {
+const _never = new Stream<never>(() => { throw new StreamingError('never stream cannot [PUSH]') }); {
+    const descriptor_return_never = { value: () => _never };
+    Object.defineProperties(_never, {
         map: descriptor_return_never,
         filter: descriptor_return_never,
         snapshot: descriptor_return_never,
@@ -285,44 +368,36 @@ export class Cell<A> {
     static switchC<A>(cell: Cell<Cell<A>>): Cell<A> {
         const s = new Stream<A>(Stream.PASS_THROUGH);
         cell.listen((v) => {
-            _disconnect(cell.valueOf()._stream, s);
-            _connect(v._stream, s);
-            s[PUSH](v.valueOf());
+            StreamPipe.disconnect(cell.sample()[INPUT], s);
+            StreamPipe.connect(v[INPUT], s);
+            s[PUSH](v.sample());
         });
-        return s.hold(cell.valueOf().valueOf());
+        return s.hold(cell.sample().sample());
     }
 
     static switchS<A>(cell: Cell<Stream<A>>): Stream<A> {
         const s = new Stream<A>(Stream.PASS_THROUGH);
         cell.listen((v) => {
-            _disconnect(cell.valueOf(), s);
-            _connect(v, s);
+            StreamPipe.disconnect(cell.sample(), s);
+            StreamPipe.connect(v, s);
         });
         return s;
     }
 
-    static _applyUpdate(updates: Map<Cell<unknown>,unknown>) {
-        updates.forEach((value,cell) => cell._value = value);
-    }
-
-    static _getStream<A>(c: Cell<A>) {
-        return c._stream;
-    }
-
-    protected _value: A;
-    protected _stream: Stream<A>;
+    [VALUE]: A;
+    [INPUT]: Stream<A>;
 
     constructor(init: A, stream?: Stream<A>) {
-        this._value = init;
-        this._stream = stream instanceof Stream ? stream : never;
+        this[VALUE] = init;
+        this[INPUT] = stream instanceof Stream ? stream : _never;
     }
 
     /**
      * listenerを登録する。Streamとは違い、初期値があるので即座に一度発火する。
      */
     listen(action: (v: A) => void): Listener {
-        const l = this._stream.listen(action);
-        action(this.valueOf());
+        const l = this[INPUT].listen(action);
+        action(this.sample());
         return l;
     }
 
@@ -330,7 +405,7 @@ export class Cell<A> {
      * 別のセルに自身の値をマッピングする。
      */
     map<B>(action: (value: A) => B): Cell<B> {
-        return this._stream.map(action).hold(action(this.valueOf()));
+        return this[INPUT].map(action).hold(action(this.sample()));
     }
 
     /**
@@ -346,50 +421,47 @@ export class Cell<A> {
         const values : any[] = [];
 
         let update_flag = true;
-        cells.forEach((c, i) => c.listen((v) => {
+        cells.map(Operational.updates).forEach((s,i) => s.listen((v) => {
             values[i] = v;
-            if (update_flag) return;
-            update_flag = true;
-            _run_continue(push);
+            if (!update_flag) {
+                update_flag = true;
+                Transaction.currentTransaction[PUSH](() => {
+                    StreamPipe.flow(stream, lambda(...<[A]>values));
+                    update_flag = false;
+                });
+            }
         }));
         update_flag = false;
 
         return stream.hold(lambda(...<[A]>values));
-
-        function push() {
-            stream[PUSH](lambda(...<[A]>values));
-            update_flag = false;
-        }
 
     }
 
     /**
      * 格納中の値を返す。sodium で言うところのsample()。
      */
-    valueOf(): A {
-        return this._value;
+    sample(): A {
+        return this[VALUE];
     }
 
     toString(): string {
-        return this._value + '';
+        return `[object Cell<${this[VALUE]}>]`;
     }
 
 }
 
 export class StreamLoop<A> extends Stream<A> {
 
-    static _waiting: Set<StreamLoop<unknown>> = new Set();
-
     constructor() {
-        if(!Transaction.currentTransaction.running) throw new Error('StreamLoopはトランザクション中にしか作成できません');
+        if(!Transaction.currentTransaction.running) throw new Error('StreamLoop / CellLoopはトランザクション中にしか作成できません');
         super(Stream.PASS_THROUGH);
-        StreamLoop._waiting.add(this);
+        Transaction.currentTransaction.waiting.add(this);
     }
 
     loop(out: Stream<A>) {
-        if(!StreamLoop._waiting.has(this)) throw new Error('loopメソッドは既に呼び出し済みです');
-        StreamLoop._waiting.delete(this);
-        _connect(out, this);
+        if(!Transaction.currentTransaction.waiting.has(this)) throw new Error('loopメソッドは既に呼び出し済みです');
+        Transaction.currentTransaction.waiting.delete(this);
+        StreamPipe.connect(out, this);
     }
 
 }
@@ -400,72 +472,76 @@ export class CellLoop<A> extends Cell<A> {
     static _waiting : Set<CellLoop<unknown>> = new Set();
 
     constructor() {
-        if(!Transaction.currentTransaction.running) throw new Error('CellLoopはトランザクション中にしか作成できません');
-        super(<any>CellLoop.BEFORE_INIT, new Stream<A>(Stream.PASS_THROUGH));
-        CellLoop._waiting.add(this);
+        if(!Transaction.currentTransaction.running) throw new Error('StreamLoop / CellLoopはトランザクション中にしか作成できません');
+        super(<A><unknown>CellLoop.BEFORE_INIT, new Stream<A>(Stream.PASS_THROUGH));
+        Transaction.currentTransaction.waiting.add(this);
     }
 
     loop(out: Cell<A>) {
-        if (!CellLoop._waiting.has(this)) throw new Error('loopメソッドは既に呼び出し済みです')
-        CellLoop._waiting.delete(this);
+        if(!Transaction.currentTransaction.waiting.has(this)) throw new Error('loopメソッドは既に呼び出し済みです');
+        Transaction.currentTransaction.waiting.delete(this);
 
-        const proxy = Cell._getStream(this);
-        const origin = Cell._getStream(out);
-        const added = _connections.get(proxy);
+        const proxy = this[INPUT];
+        const origin = out[INPUT];
+        const added = StreamPipe.streams.get(proxy);
 
-        this._stream = origin;
-        this._value = out.valueOf();
+        this[INPUT] = origin;
+        this[VALUE] = out.sample();
         if (!added) return;
 
-        _connections.delete(proxy);
+        StreamPipe.streams.delete(proxy);
         if(Array.isArray(added))
-            added.forEach(_connect.bind(null, origin));
+            added.forEach(StreamPipe.connect.bind(StreamPipe, origin));
         else
-            _connect(origin, added);
+            StreamPipe.connect(origin, added);
     }
 
 }
 
 export class StreamSink<A> extends Stream<A> {
 
-    private _queue: A[];
+    private _message?: A;
 
-    static valueOfLast<A>(values: A[]): A {
-        return values[values.length - 1];
-    }
+    private _colease: (a:A,b:A) => A =
+        () => { throw new Error('同一トランザクションで複数回sendする場合はSink生成時にcoleaseを指定してください') };
 
-    constructor(colease?: (...values: A[]) => A) {
-        super(colease
-            ? (values: A[]) => colease(...values)
-            : StreamSink.valueOfLast);
-        this._queue = [];
+    constructor(colease?: (a:A,b:A) => A) {
+        super(Stream.PASS_THROUGH);
+        if(colease) this._colease = colease;
     }
 
     send(value: A) {
-        if (this._queue.push(value) === 1)
-            _run_continue(() => _flow(this, this._queue.splice(0)));
+        if (Transaction.currentTransaction.listening)
+            throw new Error('Listenerが呼び出されている間、sendは使用できません');
+        // トランザクションを開始する
+        if (!Transaction.currentTransaction.running) {
+            Transaction.run(() => StreamPipe.flow(this, value));
+        }
+        // 実行中のトランザクションにpush済みなら、値をcoleaseする
+        else if(this.hasOwnProperty('_message')) {
+            this._message = this._colease(value, <A> this._message);
+        }
+        // 実行中のトランザクションにpushする
+        else {
+            this._message = value;
+            Transaction.currentTransaction[PUSH](() => {
+                const v = this._message;
+                delete this._message;
+                StreamPipe.flow(this, v);
+            });
+        }
     }
 
 }
 
 export class CellSink<A> extends Cell<A> {
 
-    private _queue: A[];
-
-    static takeFirstArg<A>(values: A[]): A {
-        return values[0];
-    }
-
-    constructor(init: A, colease?: (...value: A[]) => A) {
-        super(init, new Stream<A>(colease
-            ? (values: A[]) => colease(...values)
-            : CellSink.takeFirstArg));
-        this._queue = [];
+    constructor(init: A, colease?: (a:A,b:A) => A) {
+        super(init, new StreamSink<A>(colease));
     }
 
     send(value: A) {
-        if (this._queue.push(value) === 1)
-            _run_continue(() => _flow(this._stream, this._queue.splice(0)));
+        (<StreamSink<A>>this[INPUT]).send(value);
     }
 
 }
@@ -602,56 +678,60 @@ type ShadowEventMap = {
     wheel: Stream<WheelEvent>;
 } & { [key:string]: Stream<Event> };
 
+
 class VDOMConnection extends Map<VDOMObject, Listener> {
 
-    private updated: VDOMUpdateHistory[];
+    private map : Map<VDOMObject, Listener>;
+    private queue : VDOMUpdateHistory[];
 
     constructor() {
         super();
-        this.updated = [];
+        this.map = new Map();
+        this.queue = [];
     }
 
     registerCell(ctx: VDOMObject, cell: Cell<JSHTMLSource>) {
-        this.get(ctx)?.unlisten();
-        this.set(ctx, cell.listen((v) => this.reserveCellUpdate({
-            target: ctx,
-            newValue: v,
-            oldValue: cell.valueOf()
-        })));
+        this.map.get(ctx)?.unlisten();
+        this.map.set(ctx, 
+            cell.listen((v) => this.enqueue({
+                target: ctx,
+                newValue: v,
+                oldValue: cell.sample()
+            }))
+        );
     }
 
     unregisterCell(ctx: VDOMObject) {
-        this.get(ctx)?.unlisten();
-        this.delete(ctx);
+        this.map.get(ctx)?.unlisten();
+        this.map.delete(ctx);
     }
 
     garbageCollect(root: VDOMObject): void {
-        Array.from(this.keys())
+        Array.from(this.map.keys())
             .filter((c) => root.contains(c))
             .forEach((c) => this.unregisterCell(c));
     }
 
-    reserveCellUpdate(upd: VDOMUpdateHistory) {
-        if(this.updated.push(upd) !== 1) return;
-        const exec_update = () => {
-            while(this.updated.length)
-                this.applyVDOMUpdate(this.updated.splice(0));
-        };
-        if(Transaction.currentTransaction.running)
-            Transaction.onTransactionEnd(exec_update);
-        else 
-            exec_update();
+    enqueue(h: VDOMUpdateHistory) {
+        if(this.queue.push(h) === 1)
+            Transaction.currentTransaction[PUSH](() =>
+                this.queue
+                    .splice(0)
+                    .filter(({target},i,q) => q.every((h) => target === h.target || !h.target.contains(target)))
+                    .forEach((h) => this.applyUpdateToVDOM(h)));
     }
 
-   applyVDOMUpdate(upd: VDOMUpdateHistory[]) {
-        upd.filter(({target}) => upd.every((h) => target === h.target || !h.target.contains(target)))
-            .forEach(({target,newValue,oldValue}) => {
-                this.garbageCollect(target);
-                target.update(newValue,oldValue);
-            });
+    applyUpdateToVDOM({target,newValue,oldValue}: VDOMUpdateHistory) {
+        this.garbageCollect(target);
+        target.update(newValue,oldValue);
+    }
+
+    static calm(updates: VDOMUpdateHistory[]) {
+        return updates.filter(({target}) => updates.every((h) => target === h.target || !h.target.contains(target)))
     }
 
 }
+
 
 
 abstract class VDOMObject {
@@ -691,10 +771,13 @@ function mergePropertyNames(...o : any[]) : string[] {
         .filter((k,i,a) => a.indexOf(k,i+1) === -1);
 }
 
-export const jshtml = (source: NodeSource) : JSHTML => new JSHTML(source);
+export function jshtml(source: NodeSource) {
+    return new JSHTML(source).result
+}
+
 export class JSHTML {
 
-    public result: Comment | Text | HTMLElement | DocumentFragment;
+    public result: Comment | Text | HTMLElementTagNameMap[keyof HTMLElementTagNameMap] | HTMLElement | DocumentFragment;
     public placeholders: VDOMPlaceholder[];
 
     constructor(source: NodeSource) {
@@ -708,7 +791,7 @@ export class JSHTML {
         }
 
         else if (source instanceof Promise) {
-            n = new Comment('[PLACEHOLDER]');
+            n = new Comment('[PROMISE]');
             const ctx = new NodeContext(n);
             source.then((s) => ctx.update(s));
         }
@@ -724,11 +807,11 @@ export class JSHTML {
         // Array to Document Fragment
         else if (Array.isArray(source)) {
             if (!source.length)
-                n = new Comment('[PLACEHOLDER]');
+                n = new Comment('[EMPTY]');
             else {
                 const df = document.createDocumentFragment();
                 source.forEach((s) => {
-                    const r = jshtml(s);
+                    const r = new JSHTML(s);
                     df.appendChild(r.result);
                     if(r.placeholders.length)
                         p.push(...r.placeholders);
@@ -892,9 +975,9 @@ class AttrContext extends VDOMObject {
             mergePropertyNames(value, old_value)
                 .map(name === 'style'
                     ? (k) : [StyleValueContext, AttrValue] =>
-                                [new StyleValueContext(elm, StyleValueContext.camelToHyphenSeparated(k)), (<{[key:string]:AttrValue}>value)[k]]
+                            [new StyleValueContext(elm, StyleValueContext.camelToHyphenSeparated(k)), (<{[key:string]:AttrValue}>value)[k]]
                     : (k) : [DatasetValueContext, AttrValue] =>
-                                [new DatasetValueContext(elm, DatasetValueContext.hyphenSeparatedToCamelize(k)), (<{[key:string]:AttrValue}>value)[k]])
+                            [new DatasetValueContext(elm, DatasetValueContext.hyphenSeparatedToCamelize(k)), (<{[key:string]:AttrValue}>value)[k]])
                 .forEach(([a,v]) => {
                     if(v instanceof Cell)
                         a.registerCell(v);
@@ -969,7 +1052,7 @@ const SHADOW = Symbol('SHADOW');
 
 const ShadowEventStreamGetter = (target: ShadowEventMapObject, prop:string|number|symbol, receiver:any) => {
     if (target.hasOwnProperty(prop)) return Reflect.get(target,prop,receiver);
-    const s = new StreamSink<Event>();
+    const s = new Stream<Event>();
     Reflect.set(target, prop, s, receiver);
     Reflect.get(target, SHADOW, receiver).addEventListener(prop, target);
     return s;
@@ -987,13 +1070,14 @@ type ShadowEventMapObject = ShadowEventMap & {
     handleEvent(e: Event): void;
 };
 
+
 export abstract class Component extends HTMLElement implements WebComponentClass {
     
     abstract render() : NodeSource;
 
     public attrChanged : { [key:string]: Stream<string|null> };
     public shadowEvents: ShadowEventMap;
-    public mutations? : MutationStream;
+    public mutationStream? : MutationStream;
 
     private shadowContext: NodeContext;
 
@@ -1006,7 +1090,11 @@ export abstract class Component extends HTMLElement implements WebComponentClass
         this.shadowEvents = new Proxy(<ShadowEventMapObject>{
             [SHADOW]: shadow,
             handleEvent(e: Event) {
-                (<StreamSink<Event>>this[e.type]).send(e);
+                const flow = () => StreamPipe.flow(this[e.type], e);
+                if(!Transaction.currentTransaction.running)
+                    Transaction.run(flow);
+                else
+                    Transaction.currentTransaction[PUSH](flow);
             }
         }, <ProxyHandler<ShadowEventMapObject>> {
             get: ShadowEventStreamGetter
@@ -1021,7 +1109,7 @@ export abstract class Component extends HTMLElement implements WebComponentClass
         (['childList','attributes','characterData'] as MutationRecordType[])
             .filter((k) => mutation_init[k])
             .map((k) => m[k] = new StreamSink<MutationRecord>());
-        this.mutations = m;
+        this.mutationStream = m;
     }
 
     attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null) {
@@ -1033,14 +1121,14 @@ export abstract class Component extends HTMLElement implements WebComponentClass
 
     connectedCallback() {
         this.shadowContext.update(this.render());
-        if(this.mutations)
-            this.mutations.observer.observe(this,  (<WebComponentConstructor>this.constructor).observedMutation);
+        if(this.mutationStream)
+            this.mutationStream.observer.observe(this,  (<WebComponentConstructor>this.constructor).observedMutation);
     }
 
     disconnectedCallback() {
         this.shadowContext.update(null);
-        if(this.mutations)
-            this.mutations.observer.disconnect();
+        if(this.mutationStream)
+            this.mutationStream.observer.disconnect();
     }
 
     get parentComponent() {
